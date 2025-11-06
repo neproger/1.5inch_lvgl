@@ -184,9 +184,23 @@ static esp_err_t app_lvgl_init(void)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Encoder and Button ///////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+static const char *knob_event_table[] = {
+    "KNOB_LEFT",
+    "KNOB_RIGHT",
+    "KNOB_H_LIM",
+    "KNOB_L_LIM",
+    "KNOB_ZERO",
+};
+
 static void knob_event_cb(void *arg, void *data)
 {
     (void)arg;
+    int ev = (int)data;
+    if (ev >= 0 && ev < 5) {
+        ESP_LOGI(TAG, "Knob event: %s", knob_event_table[ev]);
+    } else {
+        ESP_LOGI(TAG, "Knob event: %d", ev);
+    }
     LVGL_knob_event(data);
 }
 
@@ -210,9 +224,29 @@ static void knob_init(uint32_t encoder_a, uint32_t encoder_b)
     ESP_ERROR_CHECK(err);
 }
 
+static const char *button_event_table[] = {
+    "BUTTON_PRESS_DOWN",
+    "BUTTON_PRESS_UP",
+    "BUTTON_PRESS_REPEAT",
+    "BUTTON_PRESS_REPEAT_DONE",
+    "BUTTON_SINGLE_CLICK",
+    "BUTTON_DOUBLE_CLICK",
+    "BUTTON_MULTIPLE_CLICK",
+    "BUTTON_LONG_PRESS_START",
+    "BUTTON_LONG_PRESS_HOLD",
+    "BUTTON_LONG_PRESS_UP",
+    "BUTTON_PRESS_END",
+};
+
 static void button_event_cb(void *arg, void *data)
 {
     (void)arg;
+    int ev = (int)data;
+    if (ev >= 0 && ev < 12) {
+        ESP_LOGI(TAG, "Button event: %s", button_event_table[ev]);
+    } else {
+        ESP_LOGI(TAG, "Button event: %d", ev);
+    }
     LVGL_button_event(data);
 }
 
@@ -306,4 +340,3 @@ esp_err_t devices_init(void)
 
     return ESP_OK;
 }
-

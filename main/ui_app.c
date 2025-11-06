@@ -1,4 +1,9 @@
 #include "ui_app.h"
+#include "esp_log.h"
+#include "esp_lvgl_port.h"
+
+static const char *TAG_UI = "ui";
+static lv_obj_t *s_status_label = NULL;
 
 void ui_app_init(void)
 {
@@ -15,17 +20,28 @@ void ui_app_init(void)
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
 
     /* Center message */
-    lv_obj_t *label = lv_label_create(scr);
-    lv_label_set_text(label, "Hello, LVGL v9!");
-    lv_obj_center(label);
+    s_status_label = lv_label_create(scr);
+    lv_label_set_text(s_status_label, "Hello, LVGL v9!");
+    lv_obj_center(s_status_label);
 }
 
 void LVGL_knob_event(void *event)
 {
-    LV_UNUSED(event);
+    /* Called from devices_init callbacks; lock if touching LVGL */
+    lvgl_port_lock(-1);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Knob: %d", (int)event);
+    lv_label_set_text(s_status_label, buf);
+    lvgl_port_unlock();
+    ESP_LOGI(TAG_UI, "Knob event: %d", (int)event);
 }
 
 void LVGL_button_event(void *event)
 {
-    LV_UNUSED(event);
+    lvgl_port_lock(-1);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Button: %d", (int)event);
+    lv_label_set_text(s_status_label, buf);
+    lvgl_port_unlock();
+    ESP_LOGI(TAG_UI, "Button event: %d", (int)event);
 }
