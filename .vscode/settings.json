@@ -1,0 +1,26 @@
+{
+  "files.associations": {
+    "esp_lcd_sh8601.h": "c",
+    "esp_lcd_touch_cst816s.h": "c",
+    "ui.h": "c",
+    "hf_encoder_butto.h": "c",
+    "ui_helpers.h": "c",
+    "ui_events.h": "c",
+    "lvgl.h": "c",
+    "sdkconfig.h": "c"
+  },
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "C:\\Users\\ASUS\\espidf\\.espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=C:\\Users\\ASUS\\espidf\\.espressif\\tools\\xtensa-esp-elf\\esp-14.2.0_20241119\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
+    "--compile-commands-dir=c:\\Users\\ASUS\\ESP-TEST\\examples\\ESP-IDF\\1.5inch_lvgl_v9_port\\build"
+  ],
+  "idf.flashType": "UART",
+  "idf.portWin": "COM3"
+}
