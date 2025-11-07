@@ -33,7 +33,7 @@ void ui_app_init(void)
 
     /* Title label */
     lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "KazDEV Қотағым басы");
+    lv_label_set_text(title, "KazDEV");
     lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
     lv_obj_set_style_text_font(title, &Montserrat_20, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
