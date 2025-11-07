@@ -21,6 +21,7 @@ static esp_timer_handle_t s_button_revert_timer = NULL;
 /* Forward declarations for helpers used below */
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
 static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
+static void handle_single_click(void);
 
 void ui_app_init(void)
 {
@@ -37,14 +38,27 @@ void ui_app_init(void)
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
 
     /* Center message */
-    s_status_label = lv_label_create(scr);
-    lv_label_set_text(s_status_label, "READY");
-    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_48, 0);
-    lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_center(s_status_label);
+    setLabel("READY");
 
     // пример использования (центр экрана 236x233 при 472x466):
     create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
+}
+
+void setLabel(const char *text)
+{
+    if (text == NULL) {
+        text = "";
+    }
+    lvgl_port_lock(-1);
+    if (s_status_label == NULL) {
+        lv_obj_t *scr = lv_screen_active();
+        s_status_label = lv_label_create(scr);
+        lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_center(s_status_label);
+    }
+    lv_label_set_text(s_status_label, text);
+    lvgl_port_unlock();
 }
 
 static const char *knob_event_table[] = {
@@ -77,11 +91,9 @@ void LVGL_knob_event(void *event)
     /* Throttle UI updates to avoid flicker/smearing */
     int64_t now = esp_timer_get_time();
     if (!s_showing_button && (now - s_last_update_us) >= UI_UPDATE_INTERVAL_US && s_knob_shown_value != s_knob_value) {
-        lvgl_port_lock(-1);
         char buf[32];
         snprintf(buf, sizeof(buf), "%d", s_knob_value);
-        lv_label_set_text(s_status_label, buf);
-        lvgl_port_unlock();
+        setLabel(buf);
         s_knob_shown_value = s_knob_value;
         s_last_update_us = now;
     }
@@ -93,11 +105,9 @@ static void button_revert_cb(void *arg)
 {
     /* Timer callback: switch label back to the counter */
     s_showing_button = false;
-    lvgl_port_lock(-1);
     char buf[32];
     snprintf(buf, sizeof(buf), "%d", s_knob_value);
-    lv_label_set_text(s_status_label, buf);
-    lvgl_port_unlock();
+    setLabel(buf);
     s_knob_shown_value = s_knob_value;
     s_last_update_us = esp_timer_get_time();
 }
@@ -107,7 +117,7 @@ static const char *button_event_table[] = {
     "PRESS_UP",             // 1
     "PRESS_REPEAT",         // 2
     "PRESS_REPEAT_DONE",    // 3
-    "SINGLE_CLICK",         // 4
+    "СБРОС",                // 4
     "DOUBLE_CLICK",         // 5
     "MULTIPLE_CLICK",       // 6
     "LONG_PRESS_START",     // 7
@@ -117,21 +127,35 @@ static const char *button_event_table[] = {
 };
 void LVGL_button_event(void *event)
 {
-    /* Convert event code from callback pointer */
     int ev = (int)(intptr_t)event;
 
-    /* Bounds check to avoid OOB access */
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
 
-    lvgl_port_lock(-1);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%s", label);
-    lv_label_set_text(s_status_label, buf);
-    lvgl_port_unlock();
+    switch (ev) {
+        case 4: // SINGLE_CLICK
+            ESP_LOGI(TAG_UI, "%s", label);
+            // Обновление LVGL метки (чтобы показывалось, что нажато)
+            setLabel(label);
+            handle_single_click();
+            break;
 
-    ESP_LOGI(TAG_UI, "%s", label);
-    /* Show button text for 2 seconds, then revert to the counter */
+        case 5: // DOUBLE_CLICK
+            ESP_LOGI(TAG_UI, "%s", label);
+            setLabel(label);
+            // handle_double_click();
+            break;
+
+        case 7: // LONG_PRESS_START
+            ESP_LOGI(TAG_UI, "%s", label);
+            setLabel(label);
+            // handle_long_press_start();
+            break;
+
+        default:
+            break;
+    }
+    
     s_showing_button = true;
     if (s_button_revert_timer == NULL) {
         const esp_timer_create_args_t args = {
@@ -139,12 +163,18 @@ void LVGL_button_event(void *event)
             .arg = NULL,
             .name = "ui_btn_revert",
         };
-        (void)esp_timer_create(&args, &s_button_revert_timer);
+        esp_timer_create(&args, &s_button_revert_timer);
     }
     if (s_button_revert_timer) {
-        (void)esp_timer_stop(s_button_revert_timer); /* ignore state errors */
-        (void)esp_timer_start_once(s_button_revert_timer, UI_BUTTON_SHOW_INTERVAL_US);
+        esp_timer_stop(s_button_revert_timer);
+        esp_timer_start_once(s_button_revert_timer, UI_BUTTON_SHOW_INTERVAL_US);
     }
+}
+
+
+static void handle_single_click(void)
+{
+    s_knob_value = 0;
 }
 
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color)

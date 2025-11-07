@@ -13,6 +13,9 @@ void ui_app_init(void);
 void LVGL_knob_event(void *event);
 void LVGL_button_event(void *event);
 
+/* Convenience: set central status label text */
+void setLabel(const char *text);
+
 #ifdef __cplusplus
 }
 #endif
