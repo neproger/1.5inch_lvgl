@@ -1,9 +1,26 @@
 #include "ui_app.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_timer.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
 
 static const char *TAG_UI = "ui";
 static lv_obj_t *s_status_label = NULL;
+/* Simple UI-side debounce/throttle for knob updates */
+static int s_knob_value = 0;           /* Accumulated logical knob value */
+static int s_knob_shown_value = 0;     /* Last value shown on the label */
+static int64_t s_last_update_us = 0;   /* Last UI update timestamp (us) */
+static const int64_t UI_UPDATE_INTERVAL_US = 100 * 1000; /* 100 ms */
+/* When true, suppress knob text updates while a button message is shown */
+static volatile bool s_showing_button = false;
+/* One-shot timer to revert button text back to the counter */
+static esp_timer_handle_t s_button_revert_timer = NULL;
+
+/* Forward declarations for helpers used below */
+static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
+static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 
 void ui_app_init(void)
 {
@@ -14,29 +31,70 @@ void ui_app_init(void)
 
     /* Title label */
     lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "My UI 123");
+    lv_label_set_text(title, "KazDEV");
     lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_set_style_text_font(title, LV_FONT_DEFAULT, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
 
     /* Center message */
     s_status_label = lv_label_create(scr);
-    lv_label_set_text(s_status_label, "Hello, LVGL v9!");
+    lv_label_set_text(s_status_label, "READY");
+    lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
     lv_obj_center(s_status_label);
+
+    // пример использования (центр экрана 236x233 при 472x466):
+    create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
 }
 
 void LVGL_knob_event(void *event)
 {
-    /* Called from devices_init callbacks; lock if touching LVGL */
-    lvgl_port_lock(-1);
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Knob: %d", (int)event);
-    lv_label_set_text(s_status_label, buf);
-    lvgl_port_unlock();
-    ESP_LOGI(TAG_UI, "Knob event: %d", (int)event);
+    /* Convert event code from callback */
+    int ev = (int)(intptr_t)event;
+
+    /* Update logical value based on event kind */
+    switch (ev) {
+    case 0: /* KNOB_RIGHT */
+        s_knob_value++;
+        break;
+    case 1: /* KNOB_LEFT */
+        s_knob_value--;
+        break;
+    case 4: /* KNOB_ZERO */
+        s_knob_value = 0;
+        break;
+    default:
+        break;
+    }
+
+    /* Throttle UI updates to avoid flicker/smearing */
+    int64_t now = esp_timer_get_time();
+    if (!s_showing_button && (now - s_last_update_us) >= UI_UPDATE_INTERVAL_US && s_knob_shown_value != s_knob_value) {
+        lvgl_port_lock(-1);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%d", s_knob_value);
+        lv_label_set_text(s_status_label, buf);
+        lvgl_port_unlock();
+        s_knob_shown_value = s_knob_value;
+        s_last_update_us = now;
+    }
+
+    ESP_LOGI(TAG_UI, "Knob event: %d, value=%d", ev, s_knob_value);
 }
 
+static const int64_t UI_BUTTON_SHOW_INTERVAL_US = 2000 * 1000; /* 2 s */
+static void button_revert_cb(void *arg)
+{
+    /* Timer callback: switch label back to the counter */
+    s_showing_button = false;
+    lvgl_port_lock(-1);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", s_knob_value);
+    lv_label_set_text(s_status_label, buf);
+    lvgl_port_unlock();
+    s_knob_shown_value = s_knob_value;
+    s_last_update_us = esp_timer_get_time();
+}
 void LVGL_button_event(void *event)
 {
     lvgl_port_lock(-1);
@@ -45,4 +103,43 @@ void LVGL_button_event(void *event)
     lv_label_set_text(s_status_label, buf);
     lvgl_port_unlock();
     ESP_LOGI(TAG_UI, "Button event: %d", (int)event);
+
+    /* Show button text for 2 seconds, then revert to the counter */
+    s_showing_button = true;
+    if (s_button_revert_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = &button_revert_cb,
+            .arg = NULL,
+            .name = "ui_btn_revert",
+        };
+        (void)esp_timer_create(&args, &s_button_revert_timer);
+    }
+    if (s_button_revert_timer) {
+        (void)esp_timer_stop(s_button_revert_timer); /* ignore state errors */
+        (void)esp_timer_start_once(s_button_revert_timer, UI_BUTTON_SHOW_INTERVAL_US);
+    }
+}
+
+static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color)
+{
+    lv_obj_t *dot = lv_obj_create(parent);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, d, d);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(dot, color, 0);
+    lv_obj_set_style_border_width(dot, 0, 0);
+    // позиционируем по центру точки
+    lv_obj_set_pos(dot, x - d/2, y - d/2);
+    return dot;
+}
+
+static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)
+{
+    for(int i = 0; i < n; i++) {
+        float a = (2.0f * 3.1415926f * i) / n;
+        int x = cx + (int)(radius * cosf(a));
+        int y = cy + (int)(radius * sinf(a));
+        create_dot(parent, x, y, d, color);
+    }
 }

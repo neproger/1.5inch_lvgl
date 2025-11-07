@@ -34,14 +34,32 @@ static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
 
+/* SH8601 requires x/y coordinates aligned to 2-pixel boundaries.
+ * Round LVGL invalidated areas accordingly to avoid visual artifacts. */
+static void sh8601_lvgl_rounder_cb(lv_event_t *e)
+{
+    lv_area_t *area = (lv_area_t *)lv_event_get_param(e);
+    uint16_t x1 = area->x1;
+    uint16_t x2 = area->x2;
+    uint16_t y1 = area->y1;
+    uint16_t y2 = area->y2;
+    area->x1 = (x1 >> 1) << 1;
+    area->y1 = (y1 >> 1) << 1;
+    area->x2 = ((x2 >> 1) << 1) + 1;
+    area->y2 = ((y2 >> 1) << 1) + 1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Hardware configuration ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #define EXAMPLE_LCD_HOST                  (SPI2_HOST)
 #define EXAMPLE_LCD_BITS_PER_PIXEL        (16)
-#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE      (1)
+#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE      (0)
 #define EXAMPLE_LCD_LVGL_AVOID_TEAR       (1)
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT      (80)
+#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT      (160)
+/* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
+#define EXAMPLE_LCD_SPI_SPEED_MHZ         (40)   /* Was 40 MHz; 26 MHz is safer */
+#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH     (1)    /* Limit in-flight DMA transactions */
 #define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL     1
 #define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL    !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL
 #define EXAMPLE_PIN_NUM_LCD_CS            (GPIO_NUM_12)
@@ -65,7 +83,7 @@ static esp_lcd_touch_handle_t touch_handle = NULL;
 /* Touch */
 #define EXAMPLE_TOUCH_HOST                 (I2C_NUM_0)
 #define EXAMPLE_TOUCH_I2C_NUM              (0)
-#define EXAMPLE_TOUCH_I2C_CLK_HZ           (400000)
+#define EXAMPLE_TOUCH_I2C_CLK_HZ           (100000) /* Lower speed for stability */
 #define EXAMPLE_PIN_NUM_TOUCH_SCL          (GPIO_NUM_3)
 #define EXAMPLE_PIN_NUM_TOUCH_SDA          (GPIO_NUM_1)
 #define EXAMPLE_PIN_NUM_TOUCH_RST          (GPIO_NUM_2)
@@ -104,13 +122,23 @@ static esp_err_t app_touch_init(void)
     const i2c_config_t i2c_conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = EXAMPLE_PIN_NUM_TOUCH_SDA,
-        .sda_pullup_en = GPIO_PULLUP_DISABLE,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,   /* Enable internal pull-ups unless external exist */
         .scl_io_num = EXAMPLE_PIN_NUM_TOUCH_SCL,
-        .scl_pullup_en = GPIO_PULLUP_DISABLE,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,   /* Enable internal pull-ups unless external exist */
         .master.clk_speed = EXAMPLE_TOUCH_I2C_CLK_HZ
     };
     ESP_RETURN_ON_ERROR(i2c_param_config(EXAMPLE_TOUCH_I2C_NUM, &i2c_conf), TAG, "I2C configuration failed");
     ESP_RETURN_ON_ERROR(i2c_driver_install(EXAMPLE_TOUCH_I2C_NUM, i2c_conf.mode, 0, 0, 0), TAG, "I2C initialization failed");
+
+    /* Ensure INT pin has a pull-up (CST816S INT is usually active-low/open-drain) */
+    gpio_config_t int_gpio_cfg = {
+        .pin_bit_mask = 1ULL << EXAMPLE_PIN_NUM_TOUCH_INT,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = 1,
+        .pull_down_en = 0,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&int_gpio_cfg), TAG, "INT GPIO config failed");
 
     const esp_lcd_touch_config_t tp_cfg = {
         .x_max = EXAMPLE_LCD_H_RES,
@@ -171,6 +199,11 @@ static esp_err_t app_lvgl_init(void)
         }
     };
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
+
+    /* Register rounder callback under LVGL mutex to avoid race */
+    lvgl_port_lock(-1);
+    lv_display_add_event_cb(lvgl_disp, sh8601_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+    lvgl_port_unlock();
 
     const lvgl_port_touch_cfg_t touch_cfg = {
         .disp = lvgl_disp,
@@ -299,13 +332,13 @@ esp_err_t devices_init(void)
     const esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = -1,
         .cs_gpio_num = EXAMPLE_PIN_NUM_LCD_CS,
-        .pclk_hz = 40 * 1000 * 1000,
-        .trans_queue_depth = 10,
+        .pclk_hz = EXAMPLE_LCD_SPI_SPEED_MHZ * 1000 * 1000,
+        .trans_queue_depth = EXAMPLE_LCD_TRANS_QUEUE_DEPTH,
         .lcd_cmd_bits = 32,
         .lcd_param_bits = 8,
         .spi_mode = 0,
         .flags = {
-            .quad_mode = true,
+            .quad_mode = true, /* test stability without QSPI */
         },
     };
 
@@ -333,6 +366,8 @@ esp_err_t devices_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
+    /* Reduce noisy touch logs (optional): set CST816S tag to WARN */
+    esp_log_level_set("CST816S", ESP_LOG_WARN);
     ESP_ERROR_CHECK(app_lvgl_init());
 
     knob_init(BSP_ENCODER_A, BSP_ENCODER_B);
