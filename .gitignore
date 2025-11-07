@@ -1,4 +1,5 @@
 # ===== ESP-IDF =====
+*/build/
 **/build/
 **/managed_components/
 **/CMakeFiles/
@@ -54,4 +55,3 @@ desktop.ini
 *.tmp
 *.bak
 *.swp
-
