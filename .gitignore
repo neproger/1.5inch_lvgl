@@ -1,4 +1,8 @@
 # ===== ESP-IDF =====
+# Root build directory
+/build/
+
+# Any nested build directories
 */build/
 **/build/
 **/managed_components/

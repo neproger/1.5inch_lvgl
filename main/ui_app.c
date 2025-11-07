@@ -10,7 +10,7 @@ void ui_app_init(void)
     lv_obj_t *scr = lv_screen_active();
 
     /* Optional: set a neutral background */
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
     /* Title label */
     lv_obj_t *title = lv_label_create(scr);
@@ -22,6 +22,7 @@ void ui_app_init(void)
     /* Center message */
     s_status_label = lv_label_create(scr);
     lv_label_set_text(s_status_label, "Hello, LVGL v9!");
+    lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
     lv_obj_center(s_status_label);
 }
 
