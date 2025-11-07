@@ -2,6 +2,7 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "fonts.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
@@ -32,9 +33,9 @@ void ui_app_init(void)
 
     /* Title label */
     lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "KazDEV");
+    lv_label_set_text(title, "KazDEV Қотағым басы");
     lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(title, &Montserrat_20, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
 
     /* Center message */
@@ -53,7 +54,7 @@ void setLabel(const char *text)
     if (s_status_label == NULL) {
         lv_obj_t *scr = lv_screen_active();
         s_status_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_status_label, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
         lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
         lv_obj_center(s_status_label);
     }

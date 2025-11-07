@@ -3,7 +3,9 @@ idf_component_register(
         "main.c"
         "devices_init.c"
         "ui_app.c"
+        "../fonts/Montserrat_20.c"
+        "../fonts/Montserrat_40.c"
     INCLUDE_DIRS
         "."
+        "../fonts"
 )
-
