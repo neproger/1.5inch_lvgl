@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-static const char *TAG_UI = "ui";
+static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
 /* Simple UI-side debounce/throttle for knob updates */
 static int s_knob_value = 0;           /* Accumulated logical knob value */
@@ -47,6 +47,13 @@ void ui_app_init(void)
     create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
 }
 
+static const char *knob_event_table[] = {
+    "KNOB_RIGHT",
+    "KNOB_LEFT",
+    "KNOB_H_LIM",
+    "KNOB_L_LIM",
+    "KNOB_ZERO",
+};
 void LVGL_knob_event(void *event)
 {
     /* Convert event code from callback */
@@ -78,8 +85,7 @@ void LVGL_knob_event(void *event)
         s_knob_shown_value = s_knob_value;
         s_last_update_us = now;
     }
-
-    ESP_LOGI(TAG_UI, "Knob event: %d, value=%d", ev, s_knob_value);
+    ESP_LOGI(TAG_UI, "%s | %d", knob_event_table[ev], s_knob_value);
 }
 
 static const int64_t UI_BUTTON_SHOW_INTERVAL_US = 2000 * 1000; /* 2 s */
@@ -95,15 +101,36 @@ static void button_revert_cb(void *arg)
     s_knob_shown_value = s_knob_value;
     s_last_update_us = esp_timer_get_time();
 }
+
+static const char *button_event_table[] = {
+    "PRESS_DOWN",           // 0
+    "PRESS_UP",             // 1
+    "PRESS_REPEAT",         // 2
+    "PRESS_REPEAT_DONE",    // 3
+    "SINGLE_CLICK",         // 4
+    "DOUBLE_CLICK",         // 5
+    "MULTIPLE_CLICK",       // 6
+    "LONG_PRESS_START",     // 7
+    "LONG_PRESS_HOLD",      // 8
+    "LONG_PRESS_UP",        // 9
+    "PRESS_END",            // 10
+};
 void LVGL_button_event(void *event)
 {
+    /* Convert event code from callback pointer */
+    int ev = (int)(intptr_t)event;
+
+    /* Bounds check to avoid OOB access */
+    const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
+    const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
+
     lvgl_port_lock(-1);
     char buf[32];
-    snprintf(buf, sizeof(buf), "Button: %d", (int)event);
+    snprintf(buf, sizeof(buf), "%s", label);
     lv_label_set_text(s_status_label, buf);
     lvgl_port_unlock();
-    ESP_LOGI(TAG_UI, "Button event: %d", (int)event);
 
+    ESP_LOGI(TAG_UI, "%s", label);
     /* Show button text for 2 seconds, then revert to the counter */
     s_showing_button = true;
     if (s_button_revert_timer == NULL) {
