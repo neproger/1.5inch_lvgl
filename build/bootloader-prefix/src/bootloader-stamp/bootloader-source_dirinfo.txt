@@ -4,6 +4,6 @@
 
 method=source_dir
 command=
-source_dir=C:/Users/ASUS/espidf/v5.5.1/esp-idf/components/bootloader/subproject
+source_dir=C:/Users/Engineer0/esp-idf/v5.5.1/esp-idf/components/bootloader/subproject
 work_dir=
 

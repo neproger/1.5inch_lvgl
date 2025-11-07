@@ -14,7 +14,7 @@ void ui_app_init(void)
 
     /* Title label */
     lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "My UI");
+    lv_label_set_text(title, "My UI 123");
     lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
     lv_obj_set_style_text_font(title, LV_FONT_DEFAULT, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);

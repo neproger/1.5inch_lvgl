@@ -1,2 +1,2 @@
-source C:/Users/ASUS/ESP-TEST/examples/ESP-IDF/1.5inch_lvgl_v9_port/build/gdbinit/symbols
-source C:/Users/ASUS/ESP-TEST/examples/ESP-IDF/1.5inch_lvgl_v9_port/build/gdbinit/connect
+source C:/Users/Engineer0/1.5inch_lvgl/build/gdbinit/symbols
+source C:/Users/Engineer0/1.5inch_lvgl/build/gdbinit/connect
