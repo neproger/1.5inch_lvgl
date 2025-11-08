@@ -22,7 +22,3 @@ dependencies:
   espressif/button:
     version: "==3.3.1"
     public: true
-
-  unclerus/dht:
-    version: "^0.1.0"
-    public: true
