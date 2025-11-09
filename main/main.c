@@ -7,11 +7,13 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
-#include "esp32-dht11.h"
 #include <stdbool.h>
 
-#define CONFIG_DHT11_PIN GPIO_NUM_39
-#define CONFIG_CONNECTION_TIMEOUT 5
+
+// GPIO used to power/control external device
+#define GPIO_40   GPIO_NUM_40
+
+
 
 void app_main(void)
 {
@@ -24,41 +26,29 @@ void app_main(void)
     ui_app_init();
     lvgl_port_unlock();
 
-    // Start SSR first (powers DHT), then DHT reader
-    extern void start_ssr40_blink(void);
-    start_ssr40_blink();
+    // Initialize/power external peripherals on GPIO40
+    extern void start_pin_40(void);
+    start_pin_40();
 
-    dht11_t dht11_sensor;
-    dht11_sensor.dht11_pin = CONFIG_DHT11_PIN;
 
-    // Read data
-    while(1)
-    {
-        if(!dht11_read(&dht11_sensor, CONFIG_CONNECTION_TIMEOUT))
-        {  
-            printf("[Temperature]> %.2f \n",dht11_sensor.temperature);
-            printf("[Humidity]> %.2f \n",dht11_sensor.humidity);
-        }
-        vTaskDelay(2000/portTICK_PERIOD_MS);
-    } 
+
+
 }
 
-#define APP_SSR_GPIO   GPIO_NUM_40
-void start_ssr40_blink(void)
+void start_pin_40(void)
 {
     static bool started = false;
     if (started) return;
     started = true;
-    // xTaskCreate(ssr_blink_task, "ssr40", 2048, NULL, 2, NULL);
     gpio_config_t io = {
-        .pin_bit_mask = 1ULL << APP_SSR_GPIO,
+        .pin_bit_mask = 1ULL << GPIO_40,
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io);
-    gpio_set_drive_capability(APP_SSR_GPIO, GPIO_DRIVE_CAP_0);
+    gpio_set_drive_capability(GPIO_40, GPIO_DRIVE_CAP_0);
     int lvl = 1;
-    gpio_set_level(APP_SSR_GPIO, lvl);
+    gpio_set_level(GPIO_40, lvl);
 }
