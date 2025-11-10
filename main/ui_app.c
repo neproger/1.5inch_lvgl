@@ -24,6 +24,8 @@ static esp_timer_handle_t s_button_revert_timer = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
 static bool s_last_online = false;
+static const char *s_toggle_entity = "switch.wifi_breaker_t_switch_1";
+static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
 /* Forward declarations for helpers used below */
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
@@ -32,8 +34,8 @@ static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, in
 // Signature mirrors create_ring_of_dots; 'n' is unused; 'd' is border width.
 static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
-static void ha_status_task(void *arg);
 static void ha_ui_timer_cb(void *arg);
+static void ha_toggle_task(void *arg);
 
 void ui_app_init(void)
 {
@@ -221,19 +223,27 @@ void LVGL_button_event(void *event)
 
 static void handle_single_click(void)
 {
-    s_knob_value = 0;
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_toggle_us < 700 * 1000) {
+        setLabel("WAIT");
+        return;
+    }
+    if (!ha_client_is_online()) {
+        setLabel("No HA");
+        return;
+    }
     if (s_ha_req_task == NULL) {
-        BaseType_t ok = xTaskCreate(ha_status_task, "ha_status", 6144, NULL, 4, &s_ha_req_task);
+        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
         if (ok != pdPASS) {
-            ESP_LOGW(TAG_UI, "Failed to create ha_status task");
+            ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
         }
     }
 }
 
-static void ha_status_task(void *arg)
+static void ha_toggle_task(void *arg)
 {
     (void)arg;
-    setLabel("HA...");
+    setLabel("TOGGLE...");
     if (!wifi_manager_is_connected()) {
         setLabel("No WiFi");
         s_ha_req_task = NULL;
@@ -242,15 +252,16 @@ static void ha_status_task(void *arg)
     }
 
     int code = 0;
-    esp_err_t err = ha_get_status(&code);
-    if (err == ESP_OK && code == 200) {
-        setLabel("HA OK");
+    esp_err_t err = ha_toggle(s_toggle_entity, &code);
+    if (err == ESP_OK && (code == 200 || code == 201 || code == 202)) {
+        setLabel("TGL OK");
+        s_last_toggle_us = esp_timer_get_time();
     } else if (err == ESP_OK) {
         char msg[24];
-        snprintf(msg, sizeof(msg), "HA %d", code);
+        snprintf(msg, sizeof(msg), "TGL %d", code);
         setLabel(msg);
     } else {
-        setLabel("HA ERR");
+        setLabel("TGL ERR");
     }
     s_ha_req_task = NULL;
     vTaskDelete(NULL);

@@ -70,10 +70,11 @@ static esp_err_t http_request(const char *method, const char *path,
     // Небольшие буферы клиента, чтобы экономить RAM
     esp_http_client_config_t cfg = {
         .url = url,
-        .timeout_ms = 8000,
+        .timeout_ms = 15000,
         .disable_auto_redirect = false,
         .buffer_size = 1024,
         .buffer_size_tx = 512,
+        .keep_alive_enable = true,
     };
 
     // TLS параметры только для HTTPS
@@ -113,6 +114,7 @@ static esp_err_t http_request(const char *method, const char *path,
     snprintf(auth, sizeof(auth), "Bearer %s", s_token);
     esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_header(client, "Accept", "application/json");
+    esp_http_client_set_header(client, "Connection", "keep-alive");
     if (body) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body, strlen(body));

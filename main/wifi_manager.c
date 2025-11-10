@@ -88,6 +88,8 @@ esp_err_t wifi_manager_init(void)
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
+    // Disable Wi-Fi power save to reduce latency/timeouts
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     return ESP_OK;
 }
