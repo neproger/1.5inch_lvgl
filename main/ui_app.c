@@ -11,6 +11,7 @@
 
 static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
+static lv_obj_t *s_status_ring = NULL;   /* Circular border around screen */
 /* Simple UI-side debounce/throttle for knob updates */
 static int s_knob_value = 0;           /* Accumulated logical knob value */
 static int s_knob_shown_value = 0;     /* Last value shown on the label */
@@ -21,12 +22,18 @@ static volatile bool s_showing_button = false;
 /* One-shot timer to revert button text back to the counter */
 static esp_timer_handle_t s_button_revert_timer = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
+static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
+static bool s_last_online = false;
 
 /* Forward declarations for helpers used below */
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
 static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
+// Draw circular border positioned by center (cx, cy) and radius.
+// Signature mirrors create_ring_of_dots; 'n' is unused; 'd' is border width.
+static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
 static void ha_status_task(void *arg);
+static void ha_ui_timer_cb(void *arg);
 
 void ui_app_init(void)
 {
@@ -45,8 +52,43 @@ void ui_app_init(void)
     /* Center message */
     setLabel("READY");
 
+    /* Create perimeter ring (red by default) */
+    if (s_status_ring == NULL) {
+        int w = lv_obj_get_width(scr);
+        int h = lv_obj_get_height(scr);
+        int margin = 1;
+        int r = (w < h ? w : h) / 2 - margin;
+        if (r < 4) r = (w < h ? w : h) / 2 - 1;
+        s_status_ring = create_perimeter_ring(scr, w/2, h/2, r, 0, 2, lv_color_hex(0xFF0000));
+    }
+
+    /* Start HA monitor and a small UI timer to reflect its status */
+    ha_client_start_monitor(10000);
+    if (s_ha_ui_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = &ha_ui_timer_cb,
+            .arg = NULL,
+            .name = "ui_ha_upd",
+        };
+        esp_timer_create(&args, &s_ha_ui_timer);
+        esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s */
+    }
+
     // пример использования (центр экрана 236x233 при 472x466):
     // create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
+}
+
+static void ha_ui_timer_cb(void *arg)
+{
+    (void)arg;
+    bool online = ha_client_is_online();
+    if (online != s_last_online && s_status_ring) {
+        lvgl_port_lock(-1);
+        lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
+        lv_obj_set_style_border_color(s_status_ring, col, 0);
+        lvgl_port_unlock();
+        s_last_online = online;
+    }
 }
 
 void setLabel(const char *text)
@@ -236,4 +278,27 @@ static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, in
         int y = cy + (int)(radius * sinf(a));
         create_dot(parent, x, y, d, color);
     }
+}
+
+static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)
+{
+    (void)n; /* not used */
+    int border_w = (d > 0) ? d : 2;
+    if (radius < 2) radius = 2;
+    int side = radius * 2;
+
+    lv_obj_t *ring = lv_obj_create(parent);
+    lv_obj_remove_style_all(ring);
+    lv_obj_set_size(ring, side, side);
+    /* align by center to avoid off-by-one shifts on odd dimensions */
+    int parent_w = lv_obj_get_width(parent);
+    int parent_h = lv_obj_get_height(parent);
+    int off_x = cx - parent_w / 2;
+    int off_y = cy - parent_h / 2;
+    lv_obj_align(ring, LV_ALIGN_CENTER, off_x, off_y);
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ring, border_w, 0);
+    lv_obj_set_style_border_color(ring, color, 0);
+    return ring;
 }

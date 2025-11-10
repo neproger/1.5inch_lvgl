@@ -6,11 +6,16 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+// For monitor task
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "ha_client.h"
 #include "ha_client_config.h"
 
 static const char *TAG = "ha_client";
+static volatile bool s_online = false; // last known HA availability
+static TaskHandle_t s_monitor_task = NULL;
 
 // Сохраненные параметры
 static char s_base_url[128] = {0};
@@ -87,9 +92,9 @@ static esp_err_t http_request(const char *method, const char *path,
     }
 
     // Диагностика памяти перед созданием TLS/HTTP клиента
-    size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    ESP_LOGI(TAG, "heap free=%u, largest=%u", (unsigned)free8, (unsigned)largest);
+    // size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    // size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    // ESP_LOGI(TAG, "heap free=%u, largest=%u", (unsigned)free8, (unsigned)largest);
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
@@ -152,9 +157,7 @@ esp_err_t ha_get_status(int *http_status_opt)
     int code = 0;
     esp_err_t err = http_request("GET", "/api/", NULL, buf, sizeof(buf), &code);
     if (http_status_opt) *http_status_opt = code;
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HA status %d: %s", code, buf);
-    }
+
     return err;
 }
 
@@ -200,4 +203,38 @@ esp_err_t ha_toggle(const char *entity_id, int *http_status_opt)
     char body[128];
     snprintf(body, sizeof(body), "{\"entity_id\":\"%s\"}", entity_id);
     return ha_call_service(domain, "toggle", body, NULL, 0, http_status_opt);
+}
+
+// --- Periodic monitor of HA availability ---
+static void ha_monitor_task(void *arg)
+{
+    int interval_ms = (int)(intptr_t)arg;
+    if (interval_ms <= 0) interval_ms = 5000;
+
+    while (1) {
+        int code = 0;
+        esp_err_t err = ha_get_status(&code);
+        bool ok = (err == ESP_OK && code == 200);
+        if (s_online != ok) {
+            s_online = ok;
+            ESP_LOGI(TAG, "HA monitor: online=%d", ok);
+        }
+        vTaskDelay(pdMS_TO_TICKS(interval_ms));
+    }
+}
+
+esp_err_t ha_client_start_monitor(int interval_ms)
+{
+    if (s_monitor_task) return ESP_OK;
+    BaseType_t rc = xTaskCreate(ha_monitor_task, "ha_mon", 4096, (void*)(intptr_t)interval_ms, 4, &s_monitor_task);
+    if (rc != pdPASS) {
+        s_monitor_task = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+bool ha_client_is_online(void)
+{
+    return s_online;
 }

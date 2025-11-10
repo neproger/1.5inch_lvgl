@@ -30,3 +30,10 @@ esp_err_t ha_get_state(const char *entity_id,
                        char *resp_buf, size_t resp_buf_len,
                        int *http_status_opt);
 
+// Periodic monitor of HA availability (GET /api/ every interval_ms)
+// Start once; subsequent calls are no-ops. interval_ms <= 0 -> 5000 ms.
+esp_err_t ha_client_start_monitor(int interval_ms);
+
+// Latest monitor state (true when last probe returned HTTP 200)
+bool ha_client_is_online(void);
+

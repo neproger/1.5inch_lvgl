@@ -71,7 +71,7 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 #define EXAMPLE_PIN_NUM_LCD_RST           (GPIO_NUM_8)
 #define EXAMPLE_PIN_NUM_BK_LIGHT          (GPIO_NUM_17)
 
-#define EXAMPLE_LCD_H_RES                 472
+#define EXAMPLE_LCD_H_RES                 478
 #define EXAMPLE_LCD_V_RES                 466
 
 #if CONFIG_LV_COLOR_DEPTH == 32
@@ -333,8 +333,6 @@ esp_err_t devices_init(void)
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
-    /* Apply small gap calibration to correct visual offset on this panel */
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(lcd_panel, -1, -1));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
