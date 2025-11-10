@@ -6,7 +6,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-// For monitor task
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -21,6 +21,8 @@ static volatile bool s_online = false; // last known HA availability
 static TaskHandle_t s_monitor_task = NULL;
 static TaskHandle_t s_worker_task = NULL;
 static QueueHandle_t s_req_q = NULL;
+static volatile int64_t s_last_ok_us = 0; // last successful HTTP ts
+
 
 // Сохраненные параметры
 static char s_base_url[128] = {0};
@@ -98,7 +100,7 @@ static esp_err_t http_request(const char *method, const char *path,
     // Небольшие буферы клиента, чтобы экономить RAM
     esp_http_client_config_t cfg = {
         .url = url,
-        .timeout_ms = 15000,
+        .timeout_ms = 5000,
         .disable_auto_redirect = false,
         .buffer_size = 1024,
         .buffer_size_tx = 512,
@@ -175,6 +177,7 @@ static esp_err_t http_request(const char *method, const char *path,
         out[total_read] = '\0';
     }
 
+    if (status >= 200 && status < 300) { s_last_ok_us = esp_timer_get_time(); s_online = true; }
     esp_http_client_cleanup(client);
     free(url);
     return ESP_OK;
@@ -413,8 +416,13 @@ esp_err_t ha_client_start_monitor(int interval_ms)
 
 bool ha_client_is_online(void)
 {
-    return s_online;
+    int64_t now = esp_timer_get_time();
+    if (s_last_ok_us == 0) return false;
+    bool fresh = (now - s_last_ok_us) < (30LL * 1000 * 1000);
+    if (!fresh) s_online = false;
+    return fresh && s_online;
 }
+
 
 esp_err_t ha_client_start_worker(int queue_len)
 {
@@ -431,6 +439,14 @@ esp_err_t ha_client_start_worker(int queue_len)
     }
     return ESP_OK;
 }
+
+
+
+
+
+
+
+
 
 
 

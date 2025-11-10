@@ -81,7 +81,7 @@ void ui_app_init(void)
 
     /* Start HA worker + monitor and a small UI timer to reflect its status */
     ha_client_start_worker(6);
-    ha_client_start_monitor(10000);
+    /* ha_client_start_monitor disabled to reduce background traffic */
     if (s_ha_ui_timer == NULL) {
         const esp_timer_create_args_t args = {
             .callback = &ha_ui_timer_cb,
