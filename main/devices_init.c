@@ -108,6 +108,11 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x53, (uint8_t []){0x20}, 1, 10},
     {0x51, (uint8_t []){0xFF}, 1, 10},
     {0x63, (uint8_t []){0xFF}, 1, 10},
+    /* Address window: revert to vendor defaults used previously
+     * Columns: start=6, end=477  (0x0006 .. 0x01DD) -> width 472
+     * Rows:    start=0, end=465  (0x0000 .. 0x01D1) -> height 466
+     * Fine alignment is handled via esp_lcd_panel_set_gap below.
+     */
     {0x2A, (uint8_t []){0x00,0x06,0x01,0xDD}, 4, 0},
     {0x2B, (uint8_t []){0x00,0x00,0x01,0xD1}, 4, 0},
     {0x11, (uint8_t []){0x00}, 0, 60},
@@ -328,6 +333,8 @@ esp_err_t devices_init(void)
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
+    /* Apply small gap calibration to correct visual offset on this panel */
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(lcd_panel, -1, -1));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
