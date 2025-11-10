@@ -21,6 +21,11 @@ static esp_netif_t *s_netif = NULL;
 static const int WIFI_CONNECTED_BIT = BIT0;
 static const int WIFI_GOT_IP_BIT    = BIT1;
 
+// Автопоиск/подключение
+static TaskHandle_t s_mgr_task = NULL;
+static int32_t s_min_rssi = -85;
+static int s_scan_interval_ms = 15000;
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     if (event_base == WIFI_EVENT) {
@@ -176,3 +181,36 @@ bool wifi_manager_wait_ip(int wait_ms)
     return (bits & WIFI_GOT_IP_BIT) != 0;
 }
 
+bool wifi_manager_is_connected(void)
+{
+    if (!s_wifi_event_group) return false;
+    EventBits_t bits = xEventGroupGetBits(s_wifi_event_group);
+    return (bits & WIFI_GOT_IP_BIT) != 0;
+}
+
+static void wifi_mgr_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (!wifi_manager_is_connected()) {
+            esp_err_t r = wifi_manager_connect_best_known(s_min_rssi);
+            if (r == ESP_OK) {
+                // дождаться IP немного, иначе через интервал попробуем снова
+                (void)wifi_manager_wait_ip(10000);
+            }
+            vTaskDelay(pdMS_TO_TICKS(s_scan_interval_ms));
+        } else {
+            // Подключены: просто периодически проверяем статус
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+}
+
+void wifi_manager_start_auto(int32_t min_rssi, int scan_interval_ms)
+{
+    s_min_rssi = min_rssi;
+    s_scan_interval_ms = (scan_interval_ms <= 0) ? 15000 : scan_interval_ms;
+    if (!s_mgr_task) {
+        xTaskCreate(wifi_mgr_task, "wifi_mgr", 4096, NULL, 4, &s_mgr_task);
+    }
+}

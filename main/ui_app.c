@@ -3,6 +3,8 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "fonts.h"
+#include "ha_client.h"
+#include "wifi_manager.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
@@ -18,11 +20,13 @@ static const int64_t UI_UPDATE_INTERVAL_US = 100 * 1000; /* 100 ms */
 static volatile bool s_showing_button = false;
 /* One-shot timer to revert button text back to the counter */
 static esp_timer_handle_t s_button_revert_timer = NULL;
+static TaskHandle_t s_ha_req_task = NULL;
 
 /* Forward declarations for helpers used below */
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
 static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
+static void ha_status_task(void *arg);
 
 void ui_app_init(void)
 {
@@ -42,7 +46,7 @@ void ui_app_init(void)
     setLabel("READY");
 
     // пример использования (центр экрана 236x233 при 472x466):
-    create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
+    // create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
 }
 
 void setLabel(const char *text)
@@ -176,6 +180,38 @@ void LVGL_button_event(void *event)
 static void handle_single_click(void)
 {
     s_knob_value = 0;
+    if (s_ha_req_task == NULL) {
+        BaseType_t ok = xTaskCreate(ha_status_task, "ha_status", 6144, NULL, 4, &s_ha_req_task);
+        if (ok != pdPASS) {
+            ESP_LOGW(TAG_UI, "Failed to create ha_status task");
+        }
+    }
+}
+
+static void ha_status_task(void *arg)
+{
+    (void)arg;
+    setLabel("HA...");
+    if (!wifi_manager_is_connected()) {
+        setLabel("No WiFi");
+        s_ha_req_task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int code = 0;
+    esp_err_t err = ha_get_status(&code);
+    if (err == ESP_OK && code == 200) {
+        setLabel("HA OK");
+    } else if (err == ESP_OK) {
+        char msg[24];
+        snprintf(msg, sizeof(msg), "HA %d", code);
+        setLabel(msg);
+    } else {
+        setLabel("HA ERR");
+    }
+    s_ha_req_task = NULL;
+    vTaskDelete(NULL);
 }
 
 static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color)

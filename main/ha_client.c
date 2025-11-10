@@ -1,0 +1,203 @@
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "esp_log.h"
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
+
+#include "ha_client.h"
+#include "ha_client_config.h"
+
+static const char *TAG = "ha_client";
+
+// Сохраненные параметры
+static char s_base_url[128] = {0};
+static char s_token[256]    = {0};
+static const char *s_ca_cert = NULL; // необязательный PEM для HTTPS
+
+static bool is_https_url(const char *url)
+{
+    return (url && strncasecmp(url, "https://", 8) == 0);
+}
+
+static esp_err_t ensure_initialized(void)
+{
+    if (s_base_url[0] == '\0' || s_token[0] == '\0') {
+        // Попробуем взять дефолтный конфиг
+        snprintf(s_base_url, sizeof(s_base_url), "%s", HA_DEFAULT_BASE_URL);
+        snprintf(s_token,    sizeof(s_token),    "%s", HA_DEFAULT_TOKEN);
+        s_ca_cert = HA_DEFAULT_CA_CERT;
+    }
+    if (s_base_url[0] == '\0' || s_token[0] == '\0') {
+        ESP_LOGE(TAG, "HA client not initialized and defaults are empty");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+
+esp_err_t ha_client_init(const char *base_url, const char *token, const char *ca_cert_pem)
+{
+    if (!base_url || !token) return ESP_ERR_INVALID_ARG;
+    snprintf(s_base_url, sizeof(s_base_url), "%s", base_url);
+    snprintf(s_token,    sizeof(s_token),    "%s", token);
+    s_ca_cert = ca_cert_pem; // может быть NULL
+    ESP_LOGI(TAG, "HA client configured: %s", s_base_url);
+    return ESP_OK;
+}
+
+static esp_err_t http_request(const char *method, const char *path,
+                              const char *body,
+                              char *out, size_t out_len,
+                              int *out_status_code)
+{
+    esp_err_t err = ensure_initialized();
+    if (err != ESP_OK) return err;
+
+    if (!method || !path) return ESP_ERR_INVALID_ARG;
+
+    size_t full_len = strlen(s_base_url) + strlen(path) + 2;
+    char *url = (char *)malloc(full_len);
+    if (!url) return ESP_ERR_NO_MEM;
+    snprintf(url, full_len, "%s%s", s_base_url, path);
+
+    // Небольшие буферы клиента, чтобы экономить RAM
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .timeout_ms = 8000,
+        .disable_auto_redirect = false,
+        .buffer_size = 1024,
+        .buffer_size_tx = 512,
+    };
+
+    // TLS параметры только для HTTPS
+    if (is_https_url(url)) {
+        if (s_ca_cert && s_ca_cert[0] != '\0') {
+            cfg.cert_pem = s_ca_cert; // ваш PEM корневого/самоподписанного сертификата
+        } else {
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+            cfg.crt_bundle_attach = esp_crt_bundle_attach; // использовать встроенный бандл корневых CA
+#else
+            ESP_LOGW(TAG, "HTTPS: no CA provided and certificate bundle disabled. Provide ca_cert or enable bundle, or use HTTP.");
+#endif
+        }
+        // Если используете IP/нестандартный CN, можно отключить проверку CommonName
+        cfg.skip_cert_common_name_check = true;
+    }
+
+    // Диагностика памяти перед созданием TLS/HTTP клиента
+    size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    ESP_LOGI(TAG, "heap free=%u, largest=%u", (unsigned)free8, (unsigned)largest);
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (!client) {
+        free(url);
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_http_client_set_method(client,
+        strcasecmp(method, "GET") == 0 ? HTTP_METHOD_GET :
+        strcasecmp(method, "POST") == 0 ? HTTP_METHOD_POST :
+        strcasecmp(method, "PUT") == 0 ? HTTP_METHOD_PUT :
+        strcasecmp(method, "DELETE") == 0 ? HTTP_METHOD_DELETE : HTTP_METHOD_GET);
+
+    // Заголовки
+    char auth[320];
+    snprintf(auth, sizeof(auth), "Bearer %s", s_token);
+    esp_http_client_set_header(client, "Authorization", auth);
+    esp_http_client_set_header(client, "Accept", "application/json");
+    if (body) {
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_post_field(client, body, strlen(body));
+    }
+
+    err = esp_http_client_perform(client);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP perform failed: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        free(url);
+        return err;
+    }
+
+    int status = esp_http_client_get_status_code(client);
+    if (out_status_code) *out_status_code = status;
+
+    if (out && out_len > 0) {
+        int total_read = 0;
+        int content_len = esp_http_client_get_content_length(client);
+        // Читаем по кускам
+        while (1) {
+            int remain = (int)(out_len - 1 - total_read);
+            int to_read = remain > 1024 ? 1024 : (remain > 0 ? remain : 0);
+            if (to_read <= 0) break;
+            int r = esp_http_client_read(client, out + total_read, to_read);
+            if (r <= 0) break;
+            total_read += r;
+            if (content_len > 0 && total_read >= content_len) break;
+        }
+        out[total_read] = '\0';
+    }
+
+    esp_http_client_cleanup(client);
+    free(url);
+    return ESP_OK;
+}
+
+esp_err_t ha_get_status(int *http_status_opt)
+{
+    // /api/ возвращает 200 и строку "API running." если всё ок
+    char buf[64];
+    int code = 0;
+    esp_err_t err = http_request("GET", "/api/", NULL, buf, sizeof(buf), &code);
+    if (http_status_opt) *http_status_opt = code;
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "HA status %d: %s", code, buf);
+    }
+    return err;
+}
+
+esp_err_t ha_get_state(const char *entity_id,
+                       char *resp_buf, size_t resp_buf_len,
+                       int *http_status_opt)
+{
+    if (!entity_id) return ESP_ERR_INVALID_ARG;
+    char path[256];
+    snprintf(path, sizeof(path), "/api/states/%s", entity_id);
+    return http_request("GET", path, NULL, resp_buf, resp_buf_len, http_status_opt);
+}
+
+esp_err_t ha_call_service(const char *domain, const char *service,
+                          const char *json_body,
+                          char *resp_buf, size_t resp_buf_len,
+                          int *http_status_opt)
+{
+    if (!domain || !service) return ESP_ERR_INVALID_ARG;
+    char path[256];
+    snprintf(path, sizeof(path), "/api/services/%s/%s", domain, service);
+    return http_request("POST", path, json_body, resp_buf, resp_buf_len, http_status_opt);
+}
+
+static bool split_domain_from_entity(const char *entity_id, char *domain_out, size_t domain_len)
+{
+    const char *dot = entity_id ? strchr(entity_id, '.') : NULL;
+    if (!dot) return false;
+    size_t n = (size_t)(dot - entity_id);
+    if (n + 1 > domain_len) return false;
+    memcpy(domain_out, entity_id, n);
+    domain_out[n] = '\0';
+    return true;
+}
+
+esp_err_t ha_toggle(const char *entity_id, int *http_status_opt)
+{
+    if (!entity_id) return ESP_ERR_INVALID_ARG;
+    char domain[32];
+    if (!split_domain_from_entity(entity_id, domain, sizeof(domain))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char body[128];
+    snprintf(body, sizeof(body), "{\"entity_id\":\"%s\"}", entity_id);
+    return ha_call_service(domain, "toggle", body, NULL, 0, http_status_opt);
+}

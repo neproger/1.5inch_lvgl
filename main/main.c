@@ -16,18 +16,9 @@ void app_main(void)
         return;
     }
 
-    // Wi‑Fi: инициализация и попытка подключиться к лучшей доступной сети
+    // Wi‑Fi: инициализация и запуск авто‑поиска/подключения
     if (wifi_manager_init() == ESP_OK) {
-        if (wifi_manager_connect_best_known(-85) == ESP_OK) {
-            bool got_ip = wifi_manager_wait_ip(10000);
-            if (got_ip) {
-                ESP_LOGI("app", "WiFi connected and IP obtained");
-            } else {
-                ESP_LOGI("app", "WiFi connected? waiting IP timeout");
-            }
-        } else {
-            ESP_LOGW("app", "No known WiFi in range");
-        }
+        wifi_manager_start_auto(-85, 15000); // каждые 15с пробуем, если не подключены
     } else {
         ESP_LOGW("app", "WiFi init failed");
     }

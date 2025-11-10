@@ -4,6 +4,7 @@ idf_component_register(
         "devices_init.c"
         "ui_app.c"
         "wifi_manager.c"
+        "ha_client.c"
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
     INCLUDE_DIRS
