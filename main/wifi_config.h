@@ -12,7 +12,7 @@ typedef struct {
 
 // Примеры. Замените на свои сети. Можно удалять/добавлять записи.
 static const wifi_known_ap_t WIFI_KNOWN_APS[] = {
-    { "MERCSUSYS_0348", "18188530" },
+    { "MERCUSYS_0348", "18188530" },
     { "ITPod", "zxcxzzxc" },
     // { "PhoneHotspot", "hotspot_password" },
 };
