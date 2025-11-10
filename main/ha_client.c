@@ -9,13 +9,18 @@
 // For monitor task
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 
 #include "ha_client.h"
 #include "ha_client_config.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "ha_client";
 static volatile bool s_online = false; // last known HA availability
 static TaskHandle_t s_monitor_task = NULL;
+static TaskHandle_t s_worker_task = NULL;
+static QueueHandle_t s_req_q = NULL;
 
 // Сохраненные параметры
 static char s_base_url[128] = {0};
@@ -26,6 +31,29 @@ static bool is_https_url(const char *url)
 {
     return (url && strncasecmp(url, "https://", 8) == 0);
 }
+
+typedef enum {
+    HA_OP_GET_STATUS = 0,
+    HA_OP_GET_STATE,
+    HA_OP_CALL_SERVICE,
+    HA_OP_TOGGLE,
+} ha_op_t;
+
+typedef struct {
+    ha_op_t op;
+    // Inputs
+    char entity_id[128];
+    char domain[32];
+    char service[32];
+    const char *body_json; // optional pointer; copied internally if needed
+    char *resp_buf;        // optional out buffer for GET/POST
+    size_t resp_buf_len;
+    // Outputs
+    esp_err_t err;
+    int http_status;
+    // Sync
+    SemaphoreHandle_t done;
+} ha_req_t;
 
 static esp_err_t ensure_initialized(void)
 {
@@ -74,7 +102,7 @@ static esp_err_t http_request(const char *method, const char *path,
         .disable_auto_redirect = false,
         .buffer_size = 1024,
         .buffer_size_tx = 512,
-        .keep_alive_enable = true,
+        // .keep_alive_enable = false,
     };
 
     // TLS параметры только для HTTPS
@@ -114,7 +142,7 @@ static esp_err_t http_request(const char *method, const char *path,
     snprintf(auth, sizeof(auth), "Bearer %s", s_token);
     esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_header(client, "Accept", "application/json");
-    esp_http_client_set_header(client, "Connection", "keep-alive");
+    
     if (body) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body, strlen(body));
@@ -152,8 +180,82 @@ static esp_err_t http_request(const char *method, const char *path,
     return ESP_OK;
 }
 
+// --- Worker that serializes HTTP calls ---
+static void ha_worker_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ha_req_t *req;
+        if (xQueueReceive(s_req_q, &req, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        int code = 0;
+        esp_err_t err = ESP_OK;
+        switch (req->op) {
+            case HA_OP_GET_STATUS: {
+                char buf[64];
+                err = http_request("GET", "/api/", NULL, buf, sizeof(buf), &code);
+                break;
+            }
+            case HA_OP_GET_STATE: {
+                char path[256];
+                snprintf(path, sizeof(path), "/api/states/%s", req->entity_id);
+                err = http_request("GET", path, NULL, req->resp_buf, req->resp_buf_len, &code);
+                break;
+            }
+            case HA_OP_CALL_SERVICE: {
+                char path[256];
+                snprintf(path, sizeof(path), "/api/services/%s/%s", req->domain, req->service);
+                err = http_request("POST", path, req->body_json, req->resp_buf, req->resp_buf_len, &code);
+                break;
+            }
+            case HA_OP_TOGGLE: {
+                char domain[32];
+                const char *dot = strchr(req->entity_id, '.');
+                if (!dot) { err = ESP_ERR_INVALID_ARG; break; }
+                size_t n = (size_t)(dot - req->entity_id);
+                if (n >= sizeof(domain)) { err = ESP_ERR_INVALID_ARG; break; }
+                memcpy(domain, req->entity_id, n); domain[n] = '\0';
+                char body[160];
+                snprintf(body, sizeof(body), "{\"entity_id\":\"%s\"}", req->entity_id);
+                char path[256];
+                snprintf(path, sizeof(path), "/api/services/%s/toggle", domain);
+                err = http_request("POST", path, body, NULL, 0, &code);
+                break;
+            }
+            default:
+                err = ESP_ERR_INVALID_ARG;
+                break;
+        }
+
+        req->err = err;
+        req->http_status = code;
+        if (req->done) {
+            xSemaphoreGive(req->done);
+        }
+    }
+}
+
 esp_err_t ha_get_status(int *http_status_opt)
 {
+    if (s_worker_task && s_req_q) {
+        ha_req_t req = { .op = HA_OP_GET_STATUS };
+        req.done = xSemaphoreCreateBinary();
+        if (!req.done) return ESP_ERR_NO_MEM;
+        ha_req_t *p = &req;
+        if (xQueueSend(s_req_q, &p, pdMS_TO_TICKS(100)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        if (xSemaphoreTake(req.done, pdMS_TO_TICKS(20000)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        vSemaphoreDelete(req.done);
+        if (http_status_opt) *http_status_opt = req.http_status;
+        return req.err;
+    }
     // /api/ возвращает 200 и строку "API running." если всё ок
     char buf[64];
     int code = 0;
@@ -168,6 +270,27 @@ esp_err_t ha_get_state(const char *entity_id,
                        int *http_status_opt)
 {
     if (!entity_id) return ESP_ERR_INVALID_ARG;
+    if (s_worker_task && s_req_q) {
+        ha_req_t req = {0};
+        req.op = HA_OP_GET_STATE;
+        snprintf(req.entity_id, sizeof(req.entity_id), "%s", entity_id);
+        req.resp_buf = resp_buf;
+        req.resp_buf_len = resp_buf_len;
+        req.done = xSemaphoreCreateBinary();
+        if (!req.done) return ESP_ERR_NO_MEM;
+        ha_req_t *p = &req;
+        if (xQueueSend(s_req_q, &p, pdMS_TO_TICKS(100)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        if (xSemaphoreTake(req.done, pdMS_TO_TICKS(20000)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        vSemaphoreDelete(req.done);
+        if (http_status_opt) *http_status_opt = req.http_status;
+        return req.err;
+    }
     char path[256];
     snprintf(path, sizeof(path), "/api/states/%s", entity_id);
     return http_request("GET", path, NULL, resp_buf, resp_buf_len, http_status_opt);
@@ -179,6 +302,29 @@ esp_err_t ha_call_service(const char *domain, const char *service,
                           int *http_status_opt)
 {
     if (!domain || !service) return ESP_ERR_INVALID_ARG;
+    if (s_worker_task && s_req_q) {
+        ha_req_t req = {0};
+        req.op = HA_OP_CALL_SERVICE;
+        snprintf(req.domain, sizeof(req.domain), "%s", domain);
+        snprintf(req.service, sizeof(req.service), "%s", service);
+        req.body_json = json_body;
+        req.resp_buf = resp_buf;
+        req.resp_buf_len = resp_buf_len;
+        req.done = xSemaphoreCreateBinary();
+        if (!req.done) return ESP_ERR_NO_MEM;
+        ha_req_t *p = &req;
+        if (xQueueSendToFront(s_req_q, &p, pdMS_TO_TICKS(100)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        if (xSemaphoreTake(req.done, pdMS_TO_TICKS(20000)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        vSemaphoreDelete(req.done);
+        if (http_status_opt) *http_status_opt = req.http_status;
+        return req.err;
+    }
     char path[256];
     snprintf(path, sizeof(path), "/api/services/%s/%s", domain, service);
     return http_request("POST", path, json_body, resp_buf, resp_buf_len, http_status_opt);
@@ -198,6 +344,25 @@ static bool split_domain_from_entity(const char *entity_id, char *domain_out, si
 esp_err_t ha_toggle(const char *entity_id, int *http_status_opt)
 {
     if (!entity_id) return ESP_ERR_INVALID_ARG;
+    if (s_worker_task && s_req_q) {
+        ha_req_t req = {0};
+        req.op = HA_OP_TOGGLE;
+        snprintf(req.entity_id, sizeof(req.entity_id), "%s", entity_id);
+        req.done = xSemaphoreCreateBinary();
+        if (!req.done) return ESP_ERR_NO_MEM;
+        ha_req_t *p = &req;
+        if (xQueueSendToFront(s_req_q, &p, pdMS_TO_TICKS(100)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        if (xSemaphoreTake(req.done, pdMS_TO_TICKS(20000)) != pdTRUE) {
+            vSemaphoreDelete(req.done);
+            return ESP_ERR_TIMEOUT;
+        }
+        vSemaphoreDelete(req.done);
+        if (http_status_opt) *http_status_opt = req.http_status;
+        return req.err;
+    }
     char domain[32];
     if (!split_domain_from_entity(entity_id, domain, sizeof(domain))) {
         return ESP_ERR_INVALID_ARG;
@@ -214,6 +379,15 @@ static void ha_monitor_task(void *arg)
     if (interval_ms <= 0) interval_ms = 5000;
 
     while (1) {
+        // Skip HTTP probe if WiFi is not connected to avoid long timeouts
+        if (!wifi_manager_is_connected()) {
+            if (s_online) {
+                s_online = false;
+                ESP_LOGI(TAG, "HA monitor: online=%d (no WiFi)", 0);
+            }
+            vTaskDelay(pdMS_TO_TICKS(interval_ms));
+            continue;
+        }
         int code = 0;
         esp_err_t err = ha_get_status(&code);
         bool ok = (err == ESP_OK && code == 200);
@@ -228,7 +402,8 @@ static void ha_monitor_task(void *arg)
 esp_err_t ha_client_start_monitor(int interval_ms)
 {
     if (s_monitor_task) return ESP_OK;
-    BaseType_t rc = xTaskCreate(ha_monitor_task, "ha_mon", 4096, (void*)(intptr_t)interval_ms, 4, &s_monitor_task);
+    // Run monitor with lower priority than UI/network-heavy tasks
+    BaseType_t rc = xTaskCreate(ha_monitor_task, "ha_mon", 4096, (void*)(intptr_t)interval_ms, 3, &s_monitor_task);
     if (rc != pdPASS) {
         s_monitor_task = NULL;
         return ESP_FAIL;
@@ -240,3 +415,22 @@ bool ha_client_is_online(void)
 {
     return s_online;
 }
+
+esp_err_t ha_client_start_worker(int queue_len)
+{
+    if (s_worker_task && s_req_q) return ESP_OK;
+    if (queue_len <= 0) queue_len = 4;
+    s_req_q = xQueueCreate(queue_len, sizeof(ha_req_t*));
+    if (!s_req_q) return ESP_ERR_NO_MEM;
+    BaseType_t rc = xTaskCreate(ha_worker_task, "ha_wrk", 4096, NULL, 4, &s_worker_task);
+    if (rc != pdPASS) {
+        vQueueDelete(s_req_q);
+        s_req_q = NULL;
+        s_worker_task = NULL;
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+
+

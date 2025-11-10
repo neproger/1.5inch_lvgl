@@ -16,7 +16,6 @@ static lv_obj_t *s_status_ring = NULL;   /* Circular border around screen */
 static int s_knob_value = 0;           /* Accumulated logical knob value */
 static int s_knob_shown_value = 0;     /* Last value shown on the label */
 static int64_t s_last_update_us = 0;   /* Last UI update timestamp (us) */
-static const int64_t UI_UPDATE_INTERVAL_US = 100 * 1000; /* 100 ms */
 /* When true, suppress knob text updates while a button message is shown */
 static volatile bool s_showing_button = false;
 /* One-shot timer to revert button text back to the counter */
@@ -24,18 +23,33 @@ static esp_timer_handle_t s_button_revert_timer = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
 static bool s_last_online = false;
-static const char *s_toggle_entity = "switch.wifi_breaker_t_switch_1";
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
+/* Multi-state UI: selectable HA entities + screensaver */
+typedef struct {
+    const char *name;      /* shown */
+    const char *entity_id; /* HA entity */
+} ui_item_t;
 
-/* Forward declarations for helpers used below */
-static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color);
-static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
+static const ui_item_t s_ui_items[] = {
+    { "Кухня",   "switch.wifi_breaker_t_switch_1" },
+    { "Коридор", "switch.wifi_breaker_t_switch_2" }, /* TODO: set real entity_id */
+};
+static const int s_ui_items_count = sizeof(s_ui_items) / sizeof(s_ui_items[0]);
+static int s_cur_item = 0;
+
+static bool s_screensaver = false;
+static int64_t s_last_input_us = 0;
+static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
+
 // Draw circular border positioned by center (cx, cy) and radius.
 // Signature mirrors create_ring_of_dots; 'n' is unused; 'd' is border width.
 static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
 static void ha_ui_timer_cb(void *arg);
 static void ha_toggle_task(void *arg);
+static void ui_show_current_item(void);
+static void ui_enter_screensaver(void);
+static void ui_exit_screensaver(void);
 
 void ui_app_init(void)
 {
@@ -51,8 +65,9 @@ void ui_app_init(void)
     lv_obj_set_style_text_font(title, &Montserrat_20, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
 
-    /* Center message */
-    setLabel("READY");
+    /* Initial selection shown */
+    s_last_input_us = esp_timer_get_time();
+    ui_show_current_item();
 
     /* Create perimeter ring (red by default) */
     if (s_status_ring == NULL) {
@@ -64,7 +79,8 @@ void ui_app_init(void)
         s_status_ring = create_perimeter_ring(scr, w/2, h/2, r, 0, 2, lv_color_hex(0xFF0000));
     }
 
-    /* Start HA monitor and a small UI timer to reflect its status */
+    /* Start HA worker + monitor and a small UI timer to reflect its status */
+    ha_client_start_worker(6);
     ha_client_start_monitor(10000);
     if (s_ha_ui_timer == NULL) {
         const esp_timer_create_args_t args = {
@@ -83,8 +99,12 @@ void ui_app_init(void)
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
+    int64_t now = esp_timer_get_time();
+    if (!s_screensaver && (now - s_last_input_us) >= SCREENSAVER_TIMEOUT_US) {
+        ui_enter_screensaver();
+    }
     bool online = ha_client_is_online();
-    if (online != s_last_online && s_status_ring) {
+    if (!s_screensaver && online != s_last_online && s_status_ring) {
         lvgl_port_lock(-1);
         lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
         lv_obj_set_style_border_color(s_status_ring, col, 0);
@@ -121,32 +141,30 @@ void LVGL_knob_event(void *event)
 {
     /* Convert event code from callback */
     int ev = (int)(intptr_t)event;
+    int64_t now = esp_timer_get_time();
+    s_last_input_us = now;
+    if (s_screensaver) {
+        ui_exit_screensaver();
+        return;
+    }
 
     /* Update logical value based on event kind */
     switch (ev) {
     case 0: /* KNOB_RIGHT */
-        s_knob_value++;
+        s_cur_item = (s_cur_item + 1) % s_ui_items_count;
+        ui_show_current_item();
         break;
     case 1: /* KNOB_LEFT */
-        s_knob_value--;
+        s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count;
+        ui_show_current_item();
         break;
     case 4: /* KNOB_ZERO */
-        s_knob_value = 0;
+        /* no-op */
         break;
     default:
         break;
     }
-
-    /* Throttle UI updates to avoid flicker/smearing */
-    int64_t now = esp_timer_get_time();
-    if (!s_showing_button && (now - s_last_update_us) >= UI_UPDATE_INTERVAL_US && s_knob_shown_value != s_knob_value) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d", s_knob_value);
-        setLabel(buf);
-        s_knob_shown_value = s_knob_value;
-        s_last_update_us = now;
-    }
-    ESP_LOGI(TAG_UI, "%s | %d", knob_event_table[ev], s_knob_value);
+    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
 }
 
 static const int64_t UI_BUTTON_SHOW_INTERVAL_US = 2000 * 1000; /* 2 s */
@@ -177,6 +195,11 @@ static const char *button_event_table[] = {
 void LVGL_button_event(void *event)
 {
     int ev = (int)(intptr_t)event;
+    s_last_input_us = esp_timer_get_time();
+    if (s_screensaver) {
+        ui_exit_screensaver();
+        return;
+    }
 
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
@@ -252,7 +275,8 @@ static void ha_toggle_task(void *arg)
     }
 
     int code = 0;
-    esp_err_t err = ha_toggle(s_toggle_entity, &code);
+    const char *entity = s_ui_items[s_cur_item].entity_id;
+    esp_err_t err = ha_toggle(entity, &code);
     if (err == ESP_OK && (code == 200 || code == 201 || code == 202)) {
         setLabel("TGL OK");
         s_last_toggle_us = esp_timer_get_time();
@@ -267,28 +291,36 @@ static void ha_toggle_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static lv_obj_t* create_dot(lv_obj_t *parent, int x, int y, int d, lv_color_t color)
+static void ui_show_current_item(void)
 {
-    lv_obj_t *dot = lv_obj_create(parent);
-    lv_obj_remove_style_all(dot);
-    lv_obj_set_size(dot, d, d);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(dot, color, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    // позиционируем по центру точки
-    lv_obj_set_pos(dot, x - d/2, y - d/2);
-    return dot;
+    setLabel(s_ui_items[s_cur_item].name);
 }
 
-static void create_ring_of_dots(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)
+static void ui_enter_screensaver(void)
 {
-    for(int i = 0; i < n; i++) {
-        float a = (2.0f * 3.1415926f * i) / n;
-        int x = cx + (int)(radius * cosf(a));
-        int y = cy + (int)(radius * sinf(a));
-        create_dot(parent, x, y, d, color);
+    s_screensaver = true;
+    lvgl_port_lock(-1);
+    if (s_status_ring) {
+        lv_obj_set_style_border_width(s_status_ring, 0, 0);
     }
+    if (s_status_label) {
+        lv_label_set_text(s_status_label, "");
+    }
+    lvgl_port_unlock();
+}
+
+static void ui_exit_screensaver(void)
+{
+    s_screensaver = false;
+    lvgl_port_lock(-1);
+    if (s_status_ring) {
+        lv_obj_set_style_border_width(s_status_ring, 2, 0);
+        lv_color_t col = s_last_online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
+        lv_obj_set_style_border_color(s_status_ring, col, 0);
+    }
+    lvgl_port_unlock();
+    ui_show_current_item();
+    s_last_input_us = esp_timer_get_time();
 }
 
 static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)

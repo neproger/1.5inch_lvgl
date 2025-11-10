@@ -37,3 +37,8 @@ esp_err_t ha_client_start_monitor(int interval_ms);
 // Latest monitor state (true when last probe returned HTTP 200)
 bool ha_client_is_online(void);
 
+// Start a dedicated HA worker task that serializes all HTTP requests through
+// a single queue to improve stability under flaky WiFi/routers.
+// Safe to call multiple times; queue_len recommends 4–8.
+esp_err_t ha_client_start_worker(int queue_len);
+
