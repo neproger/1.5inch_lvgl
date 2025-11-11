@@ -2,9 +2,9 @@ idf_component_register(
     SRCS
         "main.c"
         "devices_init.c"
-        "ui_app.c"
+        "ui_app.cpp"
         "wifi_manager.c"
-        "ha_client.c"
+        "ha_client.cpp"
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
     INCLUDE_DIRS
