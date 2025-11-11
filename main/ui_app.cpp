@@ -46,21 +46,19 @@ static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
 static void handle_single_click(void);
 static void ha_ui_timer_cb(void *arg);
 static void ha_toggle_task(void *arg);
-static void ha_fetch_state_task(void *arg);
-static void ha_status_task(void *arg);
 static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
 void setInfo(const char *text);
 void setLabel(const char *text);
 
-#if HA_USE_MQTT
 static char s_item_state[s_ui_items_count][12] = {"-", "-"};
 static void ui_mqtt_on_msg(const char* topic, const char* data, int len)
 {
     const char prefix[] = "ha/state/";
     const size_t pfx_len = sizeof(prefix) - 1;
     if (!topic) return;
+    ESP_LOGI(TAG_UI, "MQTT msg received: topic='%s', len=%d, data='%.*s'", topic, len, len, data ? data : "");
     if (strncmp(topic, prefix, pfx_len) != 0) return;
     const char* ent = topic + pfx_len;
     for (int i = 0; i < s_ui_items_count; ++i) {
@@ -76,7 +74,6 @@ static void ui_mqtt_on_msg(const char* topic, const char* data, int len)
         }
     }
 }
-#endif
 
 extern "C" void ui_app_init(void)
 {
@@ -112,11 +109,7 @@ extern "C" void ui_app_init(void)
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    if (s_ha_status_task == NULL) {
-        xTaskCreate(ha_status_task, "ha_stat", 4096, NULL, 3, &s_ha_status_task);
-    }
 
-#if HA_USE_MQTT
     // Subscribe to state topics for each configured entity
     ha_mqtt::set_message_handler(&ui_mqtt_on_msg);
     for (int i = 0; i < s_ui_items_count; ++i) {
@@ -124,18 +117,14 @@ extern "C" void ui_app_init(void)
         snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
         ha_mqtt::subscribe(topic, 1);
     }
-#endif
+
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
     bool online = false;
-#if HA_USE_MQTT
     online = ha_mqtt::is_connected();
-#else
-    online = ha_client_is_online();
-#endif
     if (!s_screensaver && online != s_last_online && s_status_ring) {
         lvgl_port_lock(-1);
         lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
@@ -143,59 +132,6 @@ static void ha_ui_timer_cb(void *arg)
         lvgl_port_unlock();
         s_last_online = online;
     }
-}
-
-static void ha_fetch_state_task(void *arg)
-{
-    int idx = (int)(intptr_t)arg;
-    if (idx < 0 || idx >= s_ui_items_count) {
-        s_ha_state_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-    const char *entity = s_ui_items[idx].entity_id;
-    char buf[512];
-    int code = 0;
-    esp_err_t err = ha_get_state(entity, buf, sizeof(buf), &code);
-    if (err == ESP_OK && code == 200) {
-        cJSON *root = cJSON_Parse(buf);
-        if (root) {
-            const cJSON *st = cJSON_GetObjectItemCaseSensitive(root, "state");
-            if (cJSON_IsString(st) && st->valuestring) {
-                setInfo(st->valuestring);
-            }
-            cJSON_Delete(root);
-        }
-    }
-    s_ha_state_task = NULL;
-    vTaskDelete(NULL);
-}
-
-static void ha_status_task(void *arg)
-{
-    (void)arg;
-    const TickType_t sleep_ticks = pdMS_TO_TICKS(2000);
-#if HA_USE_MQTT
-    for (;;) {
-        ESP_LOGI(TAG_UI, "MQTT: %s", ha_mqtt::is_connected() ? "CONNECTED" : "DISCONNECTED");
-        vTaskDelay(sleep_ticks);
-    }
-#else
-    const int64_t interval_us = 10LL * 1000 * 1000; // 10s
-    for (;;) {
-        int64_t now = esp_timer_get_time();
-        int64_t no_status_before = ha_client_get_no_status_until_us();
-        if (!ha_client_is_busy() && now >= no_status_before) {
-            int64_t last = ha_client_get_last_ok_us();
-            if (last == 0 || (now - last) >= interval_us) {
-                int code = 0;
-                esp_err_t err = ha_get_status(&code);
-                ESP_LOGI(TAG_UI, "HA status: err=%s http=%d", esp_err_to_name(err), code);
-            }
-        }
-        vTaskDelay(sleep_ticks);
-    }
-#endif
 }
 
 static const char *knob_event_table[] = {

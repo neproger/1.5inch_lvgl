@@ -53,7 +53,15 @@ namespace ha_mqtt
             break;
         case MQTT_EVENT_DATA:
             if (s_handler && event->topic && event->topic_len > 0) {
-                s_handler(event->topic, event->data, event->data_len);
+                // esp-mqtt provides topic with explicit length, not null-terminated.
+                // Our handler contract expects a null-terminated topic string.
+                size_t tlen = static_cast<size_t>(event->topic_len);
+                // Cap to a reasonable stack buffer size
+                char topic_buf[192];
+                if (tlen >= sizeof(topic_buf)) tlen = sizeof(topic_buf) - 1;
+                memcpy(topic_buf, event->topic, tlen);
+                topic_buf[tlen] = '\0';
+                s_handler(topic_buf, event->data, event->data_len);
             }
             break;
         default:
