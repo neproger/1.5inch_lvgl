@@ -17,6 +17,7 @@
 static const char *TAG = "ha_client";
 static volatile bool s_online = false; // last known HA availability
 static volatile int64_t s_last_ok_us = 0; // last successful HTTP ts
+static volatile bool s_http_in_flight = false; // any HTTP request is in progress
 
 
 // Сохраненные параметры
@@ -103,11 +104,6 @@ static esp_err_t http_request(const char *method, const char *path,
         cfg.skip_cert_common_name_check = true;
     }
 
-    // Диагностика памяти перед созданием TLS/HTTP клиента
-    // size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    // size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    // ESP_LOGI(TAG, "heap free=%u, largest=%u", (unsigned)free8, (unsigned)largest);
-
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client) {
         free(url);
@@ -136,11 +132,13 @@ static esp_err_t http_request(const char *method, const char *path,
     int64_t t0_us = esp_timer_get_time();
     ESP_LOGI(TAG, "HTTP %s %s body=%uB", method, url, (unsigned)body_len);
 
+    s_http_in_flight = true;
     err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         int64_t dt_us = esp_timer_get_time() - t0_us;
         ESP_LOGE(TAG, "HTTP %s %s -> err=%s (%.1f ms)",
                  method, url, esp_err_to_name(err), (double)dt_us/1000.0);
+        s_http_in_flight = false;
         esp_http_client_cleanup(client);
         free(url);
         return err;
@@ -176,6 +174,7 @@ static esp_err_t http_request(const char *method, const char *path,
     if (status >= 200 && status < 300) { s_last_ok_us = esp_timer_get_time(); s_online = true; }
     esp_http_client_cleanup(client);
     free(url);
+    s_http_in_flight = false;
     return ESP_OK;
 }
 
@@ -241,4 +240,14 @@ bool ha_client_is_online(void)
     bool fresh = (now - s_last_ok_us) < (30LL * 1000 * 1000);
     if (!fresh) s_online = false;
     return fresh && s_online;
+}
+
+int64_t ha_client_get_last_ok_us(void)
+{
+    return s_last_ok_us;
+}
+
+bool ha_client_is_busy(void)
+{
+    return s_http_in_flight;
 }

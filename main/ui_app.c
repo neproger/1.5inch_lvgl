@@ -115,12 +115,20 @@ static void ha_ui_timer_cb(void *arg)
 static void ha_status_task(void *arg)
 {
     (void)arg;
-    const TickType_t delay_ticks = pdMS_TO_TICKS(10000); /* 10s */
+    const int64_t interval_us = 10LL * 1000 * 1000; // 10s
+    const TickType_t sleep_ticks = pdMS_TO_TICKS(1000); // wake ~1s
+
     for (;;) {
-        int code = 0;
-        esp_err_t err = ha_get_status(&code);
-        ESP_LOGI(TAG_UI, "HA status: err=%s http=%d", esp_err_to_name(err), code);
-        vTaskDelay(delay_ticks);
+        if (!ha_client_is_busy()) {
+            int64_t now = esp_timer_get_time();
+            int64_t last = ha_client_get_last_ok_us();
+            if (last == 0 || (now - last) >= interval_us) {
+                int code = 0;
+                esp_err_t err = ha_get_status(&code);
+                ESP_LOGI(TAG_UI, "HA status: err=%s http=%d", esp_err_to_name(err), code);
+            }
+        }
+        vTaskDelay(sleep_ticks);
     }
 }
 

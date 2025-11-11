@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "driver/spi_master.h"
+#include "driver/ledc.h"
 #include "esp_timer.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
@@ -33,6 +34,12 @@ static esp_lcd_panel_handle_t lcd_panel = NULL;
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
+
+/* Backlight PWM (LEDC) */
+static bool s_bk_ledc_inited = false;
+static ledc_mode_t s_bk_ledc_mode = LEDC_LOW_SPEED_MODE;
+static ledc_timer_t s_bk_ledc_timer = LEDC_TIMER_0;
+static ledc_channel_t s_bk_ledc_channel = LEDC_CHANNEL_0;
 
 /* SH8601 requires x/y coordinates aligned to 2-pixel boundaries.
  * Round LVGL invalidated areas accordingly to avoid visual artifacts. */
@@ -283,13 +290,32 @@ static void button_init(uint32_t button_num)
 esp_err_t devices_init(void)
 {
     if (EXAMPLE_PIN_NUM_BK_LIGHT >= 0) {
-        gpio_config_t bk_gpio_config = {
-            .mode = GPIO_MODE_OUTPUT,
-            .pin_bit_mask = 1ULL << EXAMPLE_PIN_NUM_BK_LIGHT
+        // Configure LEDC for PWM backlight control
+        ledc_timer_config_t tcfg = {
+            .speed_mode = s_bk_ledc_mode,
+            .duty_resolution = LEDC_TIMER_8_BIT, // 0..255
+            .timer_num = s_bk_ledc_timer,
+            .freq_hz = 5000,
+            .clk_cfg = LEDC_AUTO_CLK,
         };
-        ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
-        gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, EXAMPLE_LCD_BK_LIGHT_ON_LEVEL);
-}
+        ESP_ERROR_CHECK(ledc_timer_config(&tcfg));
+
+        ledc_channel_config_t ccfg = {
+            .gpio_num = EXAMPLE_PIN_NUM_BK_LIGHT,
+            .speed_mode = s_bk_ledc_mode,
+            .channel = s_bk_ledc_channel,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = s_bk_ledc_timer,
+            .duty = 0,
+            .hpoint = 0,
+            .flags.output_invert = 0,
+        };
+        ESP_ERROR_CHECK(ledc_channel_config(&ccfg));
+        // Set initial brightness to 100%
+        ESP_ERROR_CHECK(ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, 255));
+        ESP_ERROR_CHECK(ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel));
+        s_bk_ledc_inited = true;
+    }
  
     ESP_LOGI(TAG, "Initialize SPI/QSPI bus");
     const spi_bus_config_t buscfg =
@@ -349,8 +375,19 @@ esp_err_t devices_init(void)
 // --- Backlight control ---
 esp_err_t devices_set_backlight_raw(uint8_t level)
 {
+    // Prefer PWM via LEDC; fall back to DCS 0x51 if LEDC not available
+    if (s_bk_ledc_inited) {
+        uint32_t duty = level; // 0..255
+        // Handle active-low backlight if needed
+        if (!EXAMPLE_LCD_BK_LIGHT_ON_LEVEL) {
+            duty = 255 - duty;
+        }
+        esp_err_t e1 = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, duty);
+        esp_err_t e2 = ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
+        return (e1 != ESP_OK) ? e1 : e2;
+    }
     if (lcd_io == NULL) return ESP_ERR_INVALID_STATE;
-    // SH8601 uses DCS 0x51 for brightness. Ensure BCTRL enabled via 0x53 (done in init).
+    // SH8601 DCS brightness
     esp_err_t err;
     lvgl_port_lock(-1);
     err = esp_lcd_panel_io_tx_param(lcd_io, 0x51, &level, 1);

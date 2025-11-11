@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 // Простая обёртка над REST API Home Assistant (HTTP/HTTPS)
@@ -31,3 +32,8 @@ esp_err_t ha_toggle(const char *entity_id, int *http_status_opt);
 // Онлайн по последнему успешному запросу (свежесть ~30с)
 bool ha_client_is_online(void);
 
+// Возвращает отметку времени (us, esp_timer_get_time) последнего успешного HTTP
+int64_t ha_client_get_last_ok_us(void);
+
+// Есть ли сейчас выполняющийся HTTP‑запрос (наблюдательный флаг)
+bool ha_client_is_busy(void);
