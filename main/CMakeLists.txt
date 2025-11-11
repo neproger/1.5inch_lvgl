@@ -1,10 +1,13 @@
 idf_component_register(
     SRCS
-        "main.c"
+        "main.cpp"
         "devices_init.c"
         "ui_app.cpp"
+       
         "wifi_manager.c"
         "ha_client.cpp"
+        "ha_mqtt.cpp"
+       
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
     INCLUDE_DIRS
@@ -25,4 +28,5 @@ idf_component_register(
         esp_lcd_sh8601
         esp_lvgl_port
         json
+        mqtt
 )

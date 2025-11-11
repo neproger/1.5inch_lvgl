@@ -9,8 +9,9 @@
 #include "esp_rom_sys.h"
 #include <stdbool.h>
 #include "wifi_manager.h"
+#include "ha_mqtt.hpp"
 
-void app_main(void)
+extern "C" void app_main(void)
 {
     if (devices_init() != ESP_OK) {
         return;
@@ -22,6 +23,9 @@ void app_main(void)
     } else {
         ESP_LOGW("app", "WiFi init failed");
     }
+
+    // Start MQTT client (non-blocking; reconnects automatically)
+    (void)ha_mqtt::start();
 
     /* Create your UI under LVGL mutex */
     lvgl_port_lock(0);

@@ -5,7 +5,7 @@
 // с вашими параметрами, игнорируя эти дефолты.
 
 #ifndef HA_DEFAULT_BASE_URL
-#define HA_DEFAULT_BASE_URL "http://192.168.0.105:8123" //"http://192.168.1.185:8123"
+#define HA_DEFAULT_BASE_URL "http://192.168.1.185:8123" //"http://192.168.0.105:8123" //
 #endif
 // ВАЖНО: создайте Long-Lived Access Token в Home Assistant (Профиль -> Tokens)
 // и вставьте сюда. Хранить токен в прошивке — компромисс, лучше класть в NVS.

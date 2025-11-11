@@ -4,14 +4,14 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "ha_client.h"
+#include "ha_mqtt.hpp"
+#include "ha_mqtt_config.h"
 #include "devices_init.h"
 #include "wifi_manager.h"
-#include <stdint.h>
-#include <stdbool.h>
-#include <math.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
+#include <cmath>
 #include "cJSON.h"
-#include "devices_init.h"
 
 static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
@@ -25,25 +25,23 @@ static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
 /* Multi-state UI: selectable HA entities + screensaver */
-typedef struct
-{
+typedef struct {
     const char *name;      /* shown */
     const char *entity_id; /* HA entity */
 } ui_item_t;
 
 static const ui_item_t s_ui_items[] = {
-    {"Кухня", "switch.wifi_breaker_t_switch_1"},
-    {"Коридор", "switch.wifi_breaker_t_switch_2"}, /* TODO: set real entity_id */
+    {"Кухня",   "switch.wifi_breaker_t_switch_1"},
+    {"Коридор", "switch.wifi_breaker_t_switch_2"},
 };
 static const int s_ui_items_count = sizeof(s_ui_items) / sizeof(s_ui_items[0]);
 static int s_cur_item = 0;
 
 static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
-static const int64_t SCREENSAVER_TIMEOUT_US = 10LL * 1000 * 1000; /* 30 s */
+static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
 
 // Draw circular border positioned by center (cx, cy) and radius.
-// Signature mirrors create_ring_of_dots; 'n' is unused; 'd' is border width.
 static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
 static void ha_ui_timer_cb(void *arg);
@@ -53,16 +51,36 @@ static void ha_status_task(void *arg);
 static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
-// Forward decl for secondary label setter implemented below
 void setInfo(const char *text);
+void setLabel(const char *text);
 
-#define SEC_TO_US 1000000
+#if HA_USE_MQTT
+static char s_item_state[s_ui_items_count][12] = {"-", "-"};
+static void ui_mqtt_on_msg(const char* topic, const char* data, int len)
+{
+    const char prefix[] = "ha/state/";
+    const size_t pfx_len = sizeof(prefix) - 1;
+    if (!topic) return;
+    if (strncmp(topic, prefix, pfx_len) != 0) return;
+    const char* ent = topic + pfx_len;
+    for (int i = 0; i < s_ui_items_count; ++i) {
+        if (strcmp(ent, s_ui_items[i].entity_id) == 0) {
+            int n = (len < (int)sizeof(s_item_state[i]) - 1) ? len : (int)sizeof(s_item_state[i]) - 1;
+            if (n < 0) n = 0;
+            memcpy(s_item_state[i], data ? data : "", n);
+            s_item_state[i][n] = '\0';
+            if (i == s_cur_item) {
+                setInfo(s_item_state[i]);
+            }
+            break;
+        }
+    }
+}
+#endif
 
-void ui_app_init(void)
+extern "C" void ui_app_init(void)
 {
     lv_obj_t *scr = lv_screen_active();
-
-    /* Optional: set a neutral background */
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
     /* Title label */
@@ -77,46 +95,48 @@ void ui_app_init(void)
     ui_show_current_item();
 
     /* Create perimeter ring (red by default) */
-    if (s_status_ring == NULL)
-    {
+    if (s_status_ring == NULL) {
         int w = lv_obj_get_width(scr);
         int h = lv_obj_get_height(scr);
         int margin = 1;
         int r = (w < h ? w : h) / 2 - margin;
-        if (r < 4)
-            r = (w < h ? w : h) / 2 - 1;
+        if (r < 4) r = (w < h ? w : h) / 2 - 1;
         s_status_ring = create_perimeter_ring(scr, w / 2, h / 2, r, 0, 2, lv_color_hex(0xFF0000));
     }
 
-    /* HA worker removed; direct API calls are used */
-    if (s_ha_ui_timer == NULL)
-    {
+    if (s_ha_ui_timer == NULL) {
         esp_timer_create_args_t args = {};
         args.callback = &ha_ui_timer_cb;
-        args.arg = NULL;
         args.name = "ui_ha_upd";
         esp_timer_create(&args, &s_ha_ui_timer);
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    /* Background task: poll HA status every 10s so UI thread never blocks */
-    if (s_ha_status_task == NULL)
-    {
+    if (s_ha_status_task == NULL) {
         xTaskCreate(ha_status_task, "ha_stat", 4096, NULL, 3, &s_ha_status_task);
     }
+
+#if HA_USE_MQTT
+    // Subscribe to state topics for each configured entity
+    ha_mqtt::set_message_handler(&ui_mqtt_on_msg);
+    for (int i = 0; i < s_ui_items_count; ++i) {
+        char topic[128];
+        snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
+        ha_mqtt::subscribe(topic, 1);
+    }
+#endif
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
-    int64_t now = esp_timer_get_time();
-    if (!s_screensaver && (now - s_last_input_us) >= SCREENSAVER_TIMEOUT_US)
-    {
-        ui_enter_screensaver();
-    }
-    bool online = ha_client_is_online();
-    if (!s_screensaver && online != s_last_online && s_status_ring)
-    {
+    bool online = false;
+#if HA_USE_MQTT
+    online = ha_mqtt::is_connected();
+#else
+    online = ha_client_is_online();
+#endif
+    if (!s_screensaver && online != s_last_online && s_status_ring) {
         lvgl_port_lock(-1);
         lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
         lv_obj_set_style_border_color(s_status_ring, col, 0);
@@ -128,8 +148,7 @@ static void ha_ui_timer_cb(void *arg)
 static void ha_fetch_state_task(void *arg)
 {
     int idx = (int)(intptr_t)arg;
-    if (idx < 0 || idx >= s_ui_items_count)
-    {
+    if (idx < 0 || idx >= s_ui_items_count) {
         s_ha_state_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -138,19 +157,11 @@ static void ha_fetch_state_task(void *arg)
     char buf[512];
     int code = 0;
     esp_err_t err = ha_get_state(entity, buf, sizeof(buf), &code);
-    if (err == ESP_OK && code == 200)
-    {
-        int recv_len = (int)strlen(buf);
-        ESP_LOGI(TAG_UI, "HA state raw (http=%d, bytes=%d): %s", code, recv_len, buf);
-        if (recv_len >= (int)sizeof(buf) - 1) {
-            ESP_LOGW(TAG_UI, "HA state response may be truncated (buffer=%u)", (unsigned)sizeof(buf));
-        }
+    if (err == ESP_OK && code == 200) {
         cJSON *root = cJSON_Parse(buf);
-        if (root)
-        {
+        if (root) {
             const cJSON *st = cJSON_GetObjectItemCaseSensitive(root, "state");
-            if (cJSON_IsString(st) && st->valuestring)
-            {
+            if (cJSON_IsString(st) && st->valuestring) {
                 setInfo(st->valuestring);
             }
             cJSON_Delete(root);
@@ -163,29 +174,28 @@ static void ha_fetch_state_task(void *arg)
 static void ha_status_task(void *arg)
 {
     (void)arg;
-    const int64_t interval_us = 10LL * 1000 * 1000;     // 10s
-    const TickType_t sleep_ticks = pdMS_TO_TICKS(2000); // wake ~1s
-
-    for (;;)
-    {
+    const TickType_t sleep_ticks = pdMS_TO_TICKS(2000);
+#if HA_USE_MQTT
+    for (;;) {
+        ESP_LOGI(TAG_UI, "MQTT: %s", ha_mqtt::is_connected() ? "CONNECTED" : "DISCONNECTED");
+        vTaskDelay(sleep_ticks);
+    }
+#else
+    const int64_t interval_us = 10LL * 1000 * 1000; // 10s
+    for (;;) {
         int64_t now = esp_timer_get_time();
         int64_t no_status_before = ha_client_get_no_status_until_us();
-        if (!ha_client_is_busy() && now >= no_status_before)
-        {
+        if (!ha_client_is_busy() && now >= no_status_before) {
             int64_t last = ha_client_get_last_ok_us();
-            if (last == 0 || (now - last) >= interval_us)
-            {
+            if (last == 0 || (now - last) >= interval_us) {
                 int code = 0;
                 esp_err_t err = ha_get_status(&code);
                 ESP_LOGI(TAG_UI, "HA status: err=%s http=%d", esp_err_to_name(err), code);
             }
         }
-        else
-        {
-            ESP_LOGI(TAG_UI, "HA status: BUSY");
-        }
         vTaskDelay(sleep_ticks);
     }
+#endif
 }
 
 static const char *knob_event_table[] = {
@@ -195,145 +205,79 @@ static const char *knob_event_table[] = {
     "KNOB_L_LIM",
     "KNOB_ZERO",
 };
-void LVGL_knob_event(void *event)
-{
-    /* Convert event code from callback */
-    int ev = (int)(intptr_t)event;
-    int64_t now = esp_timer_get_time();
-    s_last_input_us = now;
-    if (s_screensaver)
-    {
-        ui_exit_screensaver();
-        return;
-    }
 
-    /* Update logical value based on event kind */
-    switch (ev)
-    {
-    case 0: /* KNOB_RIGHT */
-        s_cur_item = (s_cur_item + 1) % s_ui_items_count;
-        ui_show_current_item();
-        break;
-    case 1: /* KNOB_LEFT */
-        s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count;
-        ui_show_current_item();
-        break;
-    case 4: /* KNOB_ZERO */
-        /* no-op */
-        break;
-    default:
-        break;
+extern "C" void LVGL_knob_event(void *event)
+{
+    int ev = (int)(intptr_t)event;
+    s_last_input_us = esp_timer_get_time();
+    if (s_screensaver) { ui_exit_screensaver(); return; }
+    switch (ev) {
+    case 0: s_cur_item = (s_cur_item + 1) % s_ui_items_count; ui_show_current_item(); break;
+    case 1: s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count; ui_show_current_item(); break;
+    default: break;
     }
     ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
 }
 
 static const char *button_event_table[] = {
-    "PRESS_DOWN",        // 0
-    "PRESS_UP",          // 1
-    "PRESS_REPEAT",      // 2
-    "PRESS_REPEAT_DONE", // 3
-    "SINGLE_CLICK",      // 4
-    "DOUBLE_CLICK",      // 5
-    "MULTIPLE_CLICK",    // 6
-    "LONG_PRESS_START",  // 7
-    "LONG_PRESS_HOLD",   // 8
-    "LONG_PRESS_UP",     // 9
-    "PRESS_END",         // 10
+    "PRESS_DOWN", "PRESS_UP", "PRESS_REPEAT", "PRESS_REPEAT_DONE",
+    "SINGLE_CLICK", "DOUBLE_CLICK", "MULTIPLE_CLICK", "LONG_PRESS_START",
+    "LONG_PRESS_HOLD", "LONG_PRESS_UP", "PRESS_END",
 };
-void LVGL_button_event(void *event)
+
+extern "C" void LVGL_button_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
-    if (s_screensaver)
-    {
-        ui_exit_screensaver();
-        return;
-    }
-
+    if (s_screensaver) { ui_exit_screensaver(); return; }
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
-
-    switch (ev)
-    {
-    case 4: // SINGLE_CLICK
-        ESP_LOGI(TAG_UI, "%s", label);
-        // Обновление LVGL метки (чтобы показывалось, что нажато)
-        // setLabel(label);
-        handle_single_click();
-        break;
-
-    case 5: // DOUBLE_CLICK
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
-        // handle_double_click();
-        break;
-
-    case 7: // LONG_PRESS_START
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
-        // handle_long_press_start();
-        break;
-
-    default:
-        break;
+    switch (ev) {
+    case 4: ESP_LOGI(TAG_UI, "%s", label); handle_single_click(); break;
+    case 5: ESP_LOGI(TAG_UI, "%s", label); setLabel(label); break;
+    case 7: ESP_LOGI(TAG_UI, "%s", label); setLabel(label); break;
+    default: break;
     }
 }
 
 static void handle_single_click(void)
 {
     int64_t now = esp_timer_get_time();
-    if (now - s_last_toggle_us < 700 * 1000)
-    {
-        setLabel("WAIT");
-        return;
-    }
-    if (!ha_client_is_online())
-    {
-        setLabel("No HA");
-        return;
-    }
-    if (s_ha_req_task == NULL)
-    {
+    if (now - s_last_toggle_us < 700 * 1000) { setLabel("WAIT"); return; }
+#if HA_USE_MQTT
+    if (!ha_mqtt::is_connected()) { setLabel("No MQTT"); return; }
+#else
+    if (!ha_client_is_online()) { setLabel("No HA"); return; }
+#endif
+    if (s_ha_req_task == NULL) {
         BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
-        if (ok != pdPASS)
-        {
-            ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
-        }
+        if (ok != pdPASS) { ESP_LOGW(TAG_UI, "Failed to create ha_toggle task"); }
     }
 }
 
 static void ha_toggle_task(void *arg)
 {
     (void)arg;
-    setInfo("TOGGLE...");
-    if (!wifi_manager_is_connected())
-    {
-        setInfo("No WiFi");
-        s_ha_req_task = NULL;
-        vTaskDelete(NULL);
-        return;
-    }
-
+    setInfo("-");
+    if (!wifi_manager_is_connected()) { setInfo("No WiFi"); s_ha_req_task = NULL; vTaskDelete(NULL); return; }
+#if HA_USE_MQTT
+    const char *entity = s_ui_items[s_cur_item].entity_id;
+    esp_err_t err = ha_mqtt::publish_toggle(entity);
+    if (err == ESP_OK) { s_last_toggle_us = esp_timer_get_time(); vTaskDelay(pdMS_TO_TICKS(200)); }
+    else { setInfo("MQTT ERR"); }
+#else
     int code = 0;
     const char *entity = s_ui_items[s_cur_item].entity_id;
     esp_err_t err = ha_toggle(entity, &code);
-    if (err == ESP_OK && (code == 200 || code == 201 || code == 202))
-    {
-        setInfo("TGL OK");
-        s_last_toggle_us = esp_timer_get_time();
-        // After a short delay, refresh state from HA to reflect the result
-        vTaskDelay(pdMS_TO_TICKS(200));
-        if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected())
-        {
+    if (err == ESP_OK && (code == 200 || code == 201 || code == 202)) {
+        s_last_toggle_us = esp_timer_get_time(); vTaskDelay(pdMS_TO_TICKS(200));
+        if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected()) {
             xTaskCreate(ha_fetch_state_task, "ha_state", 4096, (void *)(intptr_t)s_cur_item, 3, &s_ha_state_task);
         }
+    } else if (err == ESP_OK) {
+        char msg[24]; snprintf(msg, sizeof(msg), "TGL %d", code); setInfo(msg);
     }
-    else if (err == ESP_OK)
-    {
-        char msg[24];
-        snprintf(msg, sizeof(msg), "TGL %d", code);
-        setInfo(msg);
-    }
+#endif
     s_ha_req_task = NULL;
     vTaskDelete(NULL);
 }
@@ -341,11 +285,13 @@ static void ha_toggle_task(void *arg)
 static void ui_show_current_item(void)
 {
     setLabel(s_ui_items[s_cur_item].name);
-    // setInfo("");
-    if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected())
-    {
+#if HA_USE_MQTT
+    setInfo(s_item_state[s_cur_item]);
+#else
+    if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected()) {
         xTaskCreate(ha_fetch_state_task, "ha_state", 4096, (void *)(intptr_t)s_cur_item, 3, &s_ha_state_task);
     }
+#endif
 }
 
 static void ui_enter_screensaver(void)
@@ -353,10 +299,7 @@ static void ui_enter_screensaver(void)
     s_screensaver = true;
     devices_set_backlight_percent(10);
     lvgl_port_lock(-1);
-    if (s_status_label)
-    {
-        lv_label_set_text(s_status_label, "");
-    }
+    if (s_status_label) { lv_label_set_text(s_status_label, ""); }
     lvgl_port_unlock();
 }
 
@@ -365,8 +308,7 @@ static void ui_exit_screensaver(void)
     s_screensaver = false;
     devices_set_backlight_percent(90);
     lvgl_port_lock(-1);
-    if (s_status_ring)
-    {
+    if (s_status_ring) {
         lv_obj_set_style_border_width(s_status_ring, 2, 0);
         lv_color_t col = s_last_online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
         lv_obj_set_style_border_color(s_status_ring, col, 0);
@@ -380,14 +322,11 @@ static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
 {
     (void)n; /* not used */
     int border_w = (d > 0) ? d : 2;
-    if (radius < 2)
-        radius = 2;
+    if (radius < 2) radius = 2;
     int side = radius * 2;
-
     lv_obj_t *ring = lv_obj_create(parent);
     lv_obj_remove_style_all(ring);
     lv_obj_set_size(ring, side, side);
-    /* align by center to avoid off-by-one shifts on odd dimensions */
     int parent_w = lv_obj_get_width(parent);
     int parent_h = lv_obj_get_height(parent);
     int off_x = cx - parent_w / 2;
@@ -400,15 +339,11 @@ static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
     return ring;
 }
 
-void setLabel(const char *text)
+extern "C" void setLabel(const char *text)
 {
-    if (text == NULL)
-    {
-        text = "";
-    }
+    if (!text) text = "";
     lvgl_port_lock(-1);
-    if (s_status_label == NULL)
-    {
+    if (s_status_label == NULL) {
         lv_obj_t *scr = lv_screen_active();
         s_status_label = lv_label_create(scr);
         lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
@@ -421,31 +356,21 @@ void setLabel(const char *text)
 
 void setInfo(const char *text)
 {
-    if (text == NULL)
-    {
-        text = "";
-    }
+    if (!text) text = "";
     lvgl_port_lock(-1);
-    if (s_info_label == NULL)
-    {
+    if (s_info_label == NULL) {
         lv_obj_t *scr = lv_screen_active();
         s_info_label = lv_label_create(scr);
         lv_obj_set_style_text_font(s_info_label, &Montserrat_40, 0);
         lv_obj_set_style_text_color(s_info_label, lv_color_hex(0xA0A0A0), 0);
-        // Place under the main label if present, otherwise center
-        if (s_status_label)
-        {
+        if (s_status_label) {
             lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-        }
-        else
-        {
+        } else {
             lv_obj_center(s_info_label);
         }
     }
     lv_label_set_text(s_info_label, text);
-    // Keep it under the main label on updates
-    if (s_status_label)
-    {
+    if (s_status_label) {
         lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
     }
     lvgl_port_unlock();
