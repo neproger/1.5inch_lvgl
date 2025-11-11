@@ -1,0 +1,18 @@
+{
+  "name": "ha-mock-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mock Home Assistant REST API for firmware tests",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
+

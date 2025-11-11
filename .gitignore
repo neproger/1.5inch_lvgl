@@ -1,3 +1,5 @@
+**/node_modules/
+
 # ===== ESP-IDF =====
 # Root build directory
 /build/
