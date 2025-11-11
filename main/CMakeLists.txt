@@ -2,12 +2,27 @@ idf_component_register(
     SRCS
         "main.c"
         "devices_init.c"
-        "ui_app.c"
+        "ui_app.cpp"
         "wifi_manager.c"
-        "ha_client.c"
+        "ha_client.cpp"
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
     INCLUDE_DIRS
         "."
         "../fonts"
+    REQUIRES
+        freertos
+        esp_timer
+        esp_http_client
+        esp-tls
+        esp_wifi
+        esp_event
+        esp_netif
+        nvs_flash
+        driver
+        esp_lcd
+        esp_lcd_touch
+        esp_lcd_sh8601
+        esp_lvgl_port
+        json
 )

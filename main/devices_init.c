@@ -20,7 +20,7 @@
 #include "iot_button.h"
 
 #include "esp_lcd_sh8601.h"
-#include "esp_lcd_touch_cst816s.h"
+#include "esp_lcd_touch.h"
 
 #include "devices_init.h"
 #include "ui_app.h"
@@ -168,9 +168,15 @@ static esp_err_t app_touch_init(void)
         },
     };
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+#ifdef ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG
     const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)EXAMPLE_TOUCH_I2C_NUM, &tp_io_config, &tp_io_handle), TAG, "new_panel_io_i2c failed");
     return esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &touch_handle);
+#else
+    ESP_LOGW(TAG, "CST816S touch driver not available, skipping touch init");
+    (void)tp_io_handle;
+    return ESP_OK;
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -217,11 +223,15 @@ static esp_err_t app_lvgl_init(void)
     lv_display_add_event_cb(lvgl_disp, sh8601_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lvgl_port_unlock();
 
-    const lvgl_port_touch_cfg_t touch_cfg = {
-        .disp = lvgl_disp,
-        .handle = touch_handle,
-    };
-    lvgl_touch_indev = lvgl_port_add_touch(&touch_cfg);
+    if (touch_handle) {
+        const lvgl_port_touch_cfg_t touch_cfg = {
+            .disp = lvgl_disp,
+            .handle = touch_handle,
+        };
+        lvgl_touch_indev = lvgl_port_add_touch(&touch_cfg);
+    } else {
+        ESP_LOGW(TAG, "LVGL touch not added: no touch handle");
+    }
 
     return ESP_OK;
 }

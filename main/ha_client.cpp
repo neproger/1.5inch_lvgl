@@ -1,10 +1,13 @@
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "esp_log.h"
 #include "esp_http_client.h"
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
+#endif
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -15,29 +18,25 @@
 #include "wifi_manager.h"
 
 static const char *TAG = "ha_client";
-static volatile bool s_online = false; // last known HA availability
-static volatile int64_t s_last_ok_us = 0; // last successful HTTP ts
-static volatile bool s_http_in_flight = false; // any HTTP request is in progress
-static volatile int64_t s_last_activity_us = 0; // last HTTP start time
-static volatile int64_t s_no_status_until_us = 0; // backoff deadline for status probes
+static volatile bool s_online = false;           // last known HA availability
+static volatile int64_t s_last_ok_us = 0;        // last successful HTTP ts
+static volatile bool s_http_in_flight = false;   // any HTTP request is in progress
+static volatile int64_t s_last_activity_us = 0;  // last HTTP start time
+static volatile int64_t s_no_status_until_us = 0;// backoff deadline for status probes
 
-
-// Сохраненные параметры
+// Stored configuration
 static char s_base_url[128] = {0};
 static char s_token[256]    = {0};
-static const char *s_ca_cert = NULL; // необязательный PEM для HTTPS
+static const char *s_ca_cert = NULL; // PEM for HTTPS (optional)
 
 static bool is_https_url(const char *url)
 {
     return (url && strncasecmp(url, "https://", 8) == 0);
 }
 
-// Упрощённая версия: без очередей и фоновых задач
-
 static esp_err_t ensure_initialized(void)
 {
     if (s_base_url[0] == '\0' || s_token[0] == '\0') {
-        // Попробуем взять дефолтный конфиг
         snprintf(s_base_url, sizeof(s_base_url), "%s", HA_DEFAULT_BASE_URL);
         snprintf(s_token,    sizeof(s_token),    "%s", HA_DEFAULT_TOKEN);
         s_ca_cert = HA_DEFAULT_CA_CERT;
@@ -54,7 +53,7 @@ esp_err_t ha_client_init(const char *base_url, const char *token, const char *ca
     if (!base_url || !token) return ESP_ERR_INVALID_ARG;
     snprintf(s_base_url, sizeof(s_base_url), "%s", base_url);
     snprintf(s_token,    sizeof(s_token),    "%s", token);
-    s_ca_cert = ca_cert_pem; // может быть NULL
+    s_ca_cert = ca_cert_pem; // may be NULL
     ESP_LOGI(TAG, "HA client configured: %s", s_base_url);
     return ESP_OK;
 }
@@ -64,7 +63,7 @@ static esp_err_t http_request(const char *method, const char *path,
                               char *out, size_t out_len,
                               int *out_status_code)
 {
-    // Avoid wasting time when WiFi is down
+    // Skip if WiFi is not connected
     if (!wifi_manager_is_connected()) {
         if (out_status_code) *out_status_code = 0;
         ESP_LOGW(TAG, "WiFi not connected, skip HTTP %s %s", method ? method : "?", path ? path : "?");
@@ -81,35 +80,32 @@ static esp_err_t http_request(const char *method, const char *path,
     if (!url) return ESP_ERR_NO_MEM;
     snprintf(url, full_len, "%s%s", s_base_url, path);
 
-    // Небольшие буферы клиента, чтобы экономить RAM
-    esp_http_client_config_t cfg = {
-        .url = url,
-        .timeout_ms = 7000,
-        .disable_auto_redirect = false,
-        .buffer_size = 1024,
-        .buffer_size_tx = 512,
-        .keep_alive_enable = true,
-    };
+    // Build client config (no designated initializers in C++)
+    esp_http_client_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.url = url;
+    cfg.timeout_ms = 7000;
+    cfg.disable_auto_redirect = false;
+    cfg.buffer_size = 2048;      // increase RX buffer for headers/body chunks
+    cfg.buffer_size_tx = 1024;   // increase TX buffer for small JSON bodies
+    cfg.keep_alive_enable = true;
 
-    // TLS параметры только для HTTPS
     if (is_https_url(url)) {
         if (s_ca_cert && s_ca_cert[0] != '\0') {
-            cfg.cert_pem = s_ca_cert; // ваш PEM корневого/самоподписанного сертификата
+            cfg.cert_pem = s_ca_cert;
         } else {
-    #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-                cfg.crt_bundle_attach = esp_crt_bundle_attach; // использовать встроенный бандл корневых CA
-    #else
-                ESP_LOGW(TAG, "HTTPS: no CA provided and certificate bundle disabled. Provide ca_cert or enable bundle, or use HTTP.");
-    #endif
+        #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+            cfg.crt_bundle_attach = esp_crt_bundle_attach;
+        #else
+            ESP_LOGW(TAG, "HTTPS: no CA provided and certificate bundle disabled. Provide ca_cert or enable bundle, or use HTTP.");
+        #endif
         }
-        // Если используете IP/нестандартный CN, можно отключить проверку CommonName
         cfg.skip_cert_common_name_check = true;
     }
 
     int64_t now_us = esp_timer_get_time();
     s_last_activity_us = now_us;
     if (method && strcasecmp(method, "GET") != 0) {
-        // Apply short status backoff after service/POST requests
         const int64_t STATUS_BACKOFF_US = 1500 * 1000; // 1.5s
         s_no_status_until_us = now_us + STATUS_BACKOFF_US;
     }
@@ -126,60 +122,71 @@ static esp_err_t http_request(const char *method, const char *path,
         strcasecmp(method, "PUT") == 0 ? HTTP_METHOD_PUT :
         strcasecmp(method, "DELETE") == 0 ? HTTP_METHOD_DELETE : HTTP_METHOD_GET);
 
-    // Заголовки
     char auth[320];
     snprintf(auth, sizeof(auth), "Bearer %s", s_token);
     esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_header(client, "Accept", "application/json");
-    
+    esp_http_client_set_header(client, "Connection", "close");
+    esp_http_client_set_header(client, "Accept-Encoding", "identity");
     if (body) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body, strlen(body));
     }
 
-    // Log the outgoing request
+    // Explicit open/write/fetch/read path for robust body retrieval
     size_t body_len = body ? strlen(body) : 0;
     int64_t t0_us = esp_timer_get_time();
     ESP_LOGI(TAG, "HTTP %s %s body=%uB", method, url, (unsigned)body_len);
 
     s_http_in_flight = true;
-    err = esp_http_client_perform(client);
+    err = esp_http_client_open(client, (int)body_len);
     if (err != ESP_OK) {
         int64_t dt_us = esp_timer_get_time() - t0_us;
-        ESP_LOGE(TAG, "HTTP %s %s -> err=%s (%.1f ms)",
+        ESP_LOGE(TAG, "HTTP open %s %s -> err=%s (%.1f ms)",
                  method, url, esp_err_to_name(err), (double)dt_us/1000.0);
         s_http_in_flight = false;
         esp_http_client_cleanup(client);
         free(url);
         return err;
     }
+    if (body_len > 0) {
+        int written = esp_http_client_write(client, body, (int)body_len);
+        if (written < 0 || (size_t)written != body_len) {
+            ESP_LOGE(TAG, "HTTP write failed (%d/%u)", written, (unsigned)body_len);
+            esp_http_client_close(client);
+            s_http_in_flight = false;
+            esp_http_client_cleanup(client);
+            free(url);
+            return ESP_FAIL;
+        }
+    }
 
+    int fetch_len = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
     if (out_status_code) *out_status_code = status;
 
     if (out && out_len > 0) {
         int total_read = 0;
-        int content_len = esp_http_client_get_content_length(client);
-        // Читаем по кускам
         while (1) {
             int remain = (int)(out_len - 1 - total_read);
-            int to_read = remain > 1024 ? 1024 : (remain > 0 ? remain : 0);
-            if (to_read <= 0) break;
-            int r = esp_http_client_read(client, out + total_read, to_read);
-            if (r <= 0) break;
+            if (remain <= 0) break;
+            int r = esp_http_client_read(client, out + total_read, remain > 1024 ? 1024 : remain);
+            if (r <= 0) break; // 0 on EOF
             total_read += r;
-            if (content_len > 0 && total_read >= content_len) break;
         }
         out[total_read] = '\0';
         int64_t dt_us = esp_timer_get_time() - t0_us;
-        ESP_LOGI(TAG, "HTTP %s %s -> %d, recv=%dB (%.1f ms)",
-                 method, url, status, total_read, (double)dt_us/1000.0);
+        int content_len = esp_http_client_get_content_length(client);
+        ESP_LOGI(TAG, "HTTP %s %s -> %d, recv=%dB (%.1f ms) len=%d fetch=%d",
+                 method, url, status, total_read, (double)dt_us/1000.0, content_len, fetch_len);
     } else {
         int64_t dt_us = esp_timer_get_time() - t0_us;
         int content_len = esp_http_client_get_content_length(client);
         ESP_LOGI(TAG, "HTTP %s %s -> %d, len=%d (%.1f ms)",
                  method, url, status, content_len, (double)dt_us/1000.0);
     }
+
+    esp_http_client_close(client);
 
     if (status >= 200 && status < 300) { s_last_ok_us = esp_timer_get_time(); s_online = true; }
     esp_http_client_cleanup(client);
@@ -213,7 +220,6 @@ esp_err_t ha_call_service(const char *domain, const char *service,
                           int *http_status_opt)
 {
     if (!domain || !service) return ESP_ERR_INVALID_ARG;
-
     char path[256];
     snprintf(path, sizeof(path), "/api/services/%s/%s", domain, service);
     return http_request("POST", path, json_body, resp_buf, resp_buf_len, http_status_opt);
@@ -233,7 +239,6 @@ static bool split_domain_from_entity(const char *entity_id, char *domain_out, si
 esp_err_t ha_toggle(const char *entity_id, int *http_status_opt)
 {
     if (!entity_id) return ESP_ERR_INVALID_ARG;
-
     char domain[32];
     if (!split_domain_from_entity(entity_id, domain, sizeof(domain))) {
         return ESP_ERR_INVALID_ARG;

@@ -16,6 +16,12 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
+// Help some embedded clients by disabling keep-alive
+app.use((req, res, next) => {
+  res.set('Connection', 'close');
+  next();
+});
+
 // Simple request logger: method, url, optional body, status, duration, size, ip
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
@@ -105,6 +111,7 @@ app.get('/api/', (req, res) => {
 app.get('/api/states/:entityId', (req, res) => {
     const entityId = req.params.entityId;
     const obj = store.get(entityId);
+    console.log(obj)
     if (!obj) {
         return res.status(404).json({ message: `Entity ${entityId} not found` });
     }

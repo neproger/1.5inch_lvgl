@@ -5,6 +5,10 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Простая обёртка над REST API Home Assistant (HTTP/HTTPS)
 
 // base_url: например, "http://192.168.1.10:8123" или "https://ha.local:8123"
@@ -43,3 +47,7 @@ int64_t ha_client_get_last_activity_us(void);
 
 // Не выполнять статус‑проверку до этого момента (us), используется как «кулдаун» после POST
 int64_t ha_client_get_no_status_until_us(void);
+
+#ifdef __cplusplus
+}
+#endif
