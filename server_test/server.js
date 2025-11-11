@@ -16,7 +16,7 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-// Simple request logger: method, url, status, duration, size, ip
+// Simple request logger: method, url, optional body, status, duration, size, ip
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
   const ip = req.ip || (req.connection && req.connection.remoteAddress) || '-';
@@ -26,7 +26,17 @@ app.use((req, res, next) => {
     const durMs = Number(process.hrtime.bigint() - start) / 1e6;
     const len = res.getHeader('content-length');
     const size = len ? `${len}b` : '-';
-    console.log(`[req] ${method} ${url} -> ${res.statusCode} ${durMs.toFixed(1)}ms ${size} from ${ip}`);
+    let bodyStr = '';
+    try {
+      if (method !== 'GET' && req.body && typeof req.body === 'object') {
+        const json = JSON.stringify(req.body);
+        // Show up to 512 chars of the body for readability
+        bodyStr = ` body=${json.length > 512 ? json.slice(0, 512) + '…' : json}`;
+      }
+    } catch (_) {
+      // ignore body stringify errors
+    }
+    console.log(`[req] ${method} ${url}${bodyStr} -> ${res.statusCode} ${durMs.toFixed(1)}ms ${size} from ${ip}`);
   });
   next();
 });

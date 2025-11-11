@@ -18,6 +18,8 @@ static const char *TAG = "ha_client";
 static volatile bool s_online = false; // last known HA availability
 static volatile int64_t s_last_ok_us = 0; // last successful HTTP ts
 static volatile bool s_http_in_flight = false; // any HTTP request is in progress
+static volatile int64_t s_last_activity_us = 0; // last HTTP start time
+static volatile int64_t s_no_status_until_us = 0; // backoff deadline for status probes
 
 
 // Сохраненные параметры
@@ -102,6 +104,14 @@ static esp_err_t http_request(const char *method, const char *path,
         }
         // Если используете IP/нестандартный CN, можно отключить проверку CommonName
         cfg.skip_cert_common_name_check = true;
+    }
+
+    int64_t now_us = esp_timer_get_time();
+    s_last_activity_us = now_us;
+    if (method && strcasecmp(method, "GET") != 0) {
+        // Apply short status backoff after service/POST requests
+        const int64_t STATUS_BACKOFF_US = 1500 * 1000; // 1.5s
+        s_no_status_until_us = now_us + STATUS_BACKOFF_US;
     }
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
@@ -250,4 +260,14 @@ int64_t ha_client_get_last_ok_us(void)
 bool ha_client_is_busy(void)
 {
     return s_http_in_flight;
+}
+
+int64_t ha_client_get_last_activity_us(void)
+{
+    return s_last_activity_us;
+}
+
+int64_t ha_client_get_no_status_until_us(void)
+{
+    return s_no_status_until_us;
 }

@@ -37,3 +37,9 @@ int64_t ha_client_get_last_ok_us(void);
 
 // Есть ли сейчас выполняющийся HTTP‑запрос (наблюдательный флаг)
 bool ha_client_is_busy(void);
+
+// Время последней активности HTTP (us)
+int64_t ha_client_get_last_activity_us(void);
+
+// Не выполнять статус‑проверку до этого момента (us), используется как «кулдаун» после POST
+int64_t ha_client_get_no_status_until_us(void);
