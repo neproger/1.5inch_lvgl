@@ -4,26 +4,22 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "ha_client.h"
+#include "devices_init.h"
 #include "wifi_manager.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
+#include "devices_init.h"
 
 static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
-static lv_obj_t *s_status_ring = NULL;   /* Circular border around screen */
-/* Simple UI-side debounce/throttle for knob updates */
-static int s_knob_value = 0;           /* Accumulated logical knob value */
-static int s_knob_shown_value = 0;     /* Last value shown on the label */
-static int64_t s_last_update_us = 0;   /* Last UI update timestamp (us) */
-/* When true, suppress knob text updates while a button message is shown */
-static volatile bool s_showing_button = false;
-/* One-shot timer to revert button text back to the counter */
-static esp_timer_handle_t s_button_revert_timer = NULL;
+static lv_obj_t *s_status_ring = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
+static TaskHandle_t s_ha_status_task = NULL;    /* background HA pinger */
 static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
+
 /* Multi-state UI: selectable HA entities + screensaver */
 typedef struct {
     const char *name;      /* shown */
@@ -39,7 +35,7 @@ static int s_cur_item = 0;
 
 static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
-static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
+static const int64_t SCREENSAVER_TIMEOUT_US = 10LL * 1000 * 1000; /* 30 s */
 
 // Draw circular border positioned by center (cx, cy) and radius.
 // Signature mirrors create_ring_of_dots; 'n' is unused; 'd' is border width.
@@ -47,9 +43,12 @@ static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
 static void handle_single_click(void);
 static void ha_ui_timer_cb(void *arg);
 static void ha_toggle_task(void *arg);
+static void ha_status_task(void *arg);
 static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
+
+#define SEC_TO_US 1000000
 
 void ui_app_init(void)
 {
@@ -79,9 +78,7 @@ void ui_app_init(void)
         s_status_ring = create_perimeter_ring(scr, w/2, h/2, r, 0, 2, lv_color_hex(0xFF0000));
     }
 
-    /* Start HA worker + monitor and a small UI timer to reflect its status */
-    ha_client_start_worker(6);
-    /* ha_client_start_monitor disabled to reduce background traffic */
+    /* HA worker removed; direct API calls are used */
     if (s_ha_ui_timer == NULL) {
         const esp_timer_create_args_t args = {
             .callback = &ha_ui_timer_cb,
@@ -89,11 +86,13 @@ void ui_app_init(void)
             .name = "ui_ha_upd",
         };
         esp_timer_create(&args, &s_ha_ui_timer);
-        esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s */
+        esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    // пример использования (центр экрана 236x233 при 472x466):
-    // create_ring_of_dots(scr, 472/2, 466/2, 218, 12, 8, lv_color_hex(0xE6E6E6));
+    /* Background task: poll HA status every 10s so UI thread never blocks */
+    if (s_ha_status_task == NULL) {
+        xTaskCreate(ha_status_task, "ha_stat", 4096, NULL, 3, &s_ha_status_task);
+    }
 }
 
 static void ha_ui_timer_cb(void *arg)
@@ -113,21 +112,16 @@ static void ha_ui_timer_cb(void *arg)
     }
 }
 
-void setLabel(const char *text)
+static void ha_status_task(void *arg)
 {
-    if (text == NULL) {
-        text = "";
+    (void)arg;
+    const TickType_t delay_ticks = pdMS_TO_TICKS(10000); /* 10s */
+    for (;;) {
+        int code = 0;
+        esp_err_t err = ha_get_status(&code);
+        ESP_LOGI(TAG_UI, "HA status: err=%s http=%d", esp_err_to_name(err), code);
+        vTaskDelay(delay_ticks);
     }
-    lvgl_port_lock(-1);
-    if (s_status_label == NULL) {
-        lv_obj_t *scr = lv_screen_active();
-        s_status_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
-        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_center(s_status_label);
-    }
-    lv_label_set_text(s_status_label, text);
-    lvgl_port_unlock();
 }
 
 static const char *knob_event_table[] = {
@@ -167,24 +161,12 @@ void LVGL_knob_event(void *event)
     ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
 }
 
-static const int64_t UI_BUTTON_SHOW_INTERVAL_US = 2000 * 1000; /* 2 s */
-static void button_revert_cb(void *arg)
-{
-    /* Timer callback: switch label back to the counter */
-    s_showing_button = false;
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%d", s_knob_value);
-    setLabel(buf);
-    s_knob_shown_value = s_knob_value;
-    s_last_update_us = esp_timer_get_time();
-}
-
 static const char *button_event_table[] = {
     "PRESS_DOWN",           // 0
     "PRESS_UP",             // 1
     "PRESS_REPEAT",         // 2
     "PRESS_REPEAT_DONE",    // 3
-    "СБРОС",                // 4
+    "SINGLE_CLICK",         // 4
     "DOUBLE_CLICK",         // 5
     "MULTIPLE_CLICK",       // 6
     "LONG_PRESS_START",     // 7
@@ -208,7 +190,7 @@ void LVGL_button_event(void *event)
         case 4: // SINGLE_CLICK
             ESP_LOGI(TAG_UI, "%s", label);
             // Обновление LVGL метки (чтобы показывалось, что нажато)
-            setLabel(label);
+            // setLabel(label);
             handle_single_click();
             break;
 
@@ -226,20 +208,6 @@ void LVGL_button_event(void *event)
 
         default:
             break;
-    }
-    
-    s_showing_button = true;
-    if (s_button_revert_timer == NULL) {
-        const esp_timer_create_args_t args = {
-            .callback = &button_revert_cb,
-            .arg = NULL,
-            .name = "ui_btn_revert",
-        };
-        esp_timer_create(&args, &s_button_revert_timer);
-    }
-    if (s_button_revert_timer) {
-        esp_timer_stop(s_button_revert_timer);
-        esp_timer_start_once(s_button_revert_timer, UI_BUTTON_SHOW_INTERVAL_US);
     }
 }
 
@@ -299,10 +267,8 @@ static void ui_show_current_item(void)
 static void ui_enter_screensaver(void)
 {
     s_screensaver = true;
+    devices_set_backlight_percent(10);
     lvgl_port_lock(-1);
-    if (s_status_ring) {
-        lv_obj_set_style_border_width(s_status_ring, 0, 0);
-    }
     if (s_status_label) {
         lv_label_set_text(s_status_label, "");
     }
@@ -312,6 +278,7 @@ static void ui_enter_screensaver(void)
 static void ui_exit_screensaver(void)
 {
     s_screensaver = false;
+    devices_set_backlight_percent(90);
     lvgl_port_lock(-1);
     if (s_status_ring) {
         lv_obj_set_style_border_width(s_status_ring, 2, 0);
@@ -344,4 +311,21 @@ static lv_obj_t* create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
     lv_obj_set_style_border_width(ring, border_w, 0);
     lv_obj_set_style_border_color(ring, color, 0);
     return ring;
+}
+
+void setLabel(const char *text)
+{
+    if (text == NULL) {
+        text = "";
+    }
+    lvgl_port_lock(-1);
+    if (s_status_label == NULL) {
+        lv_obj_t *scr = lv_screen_active();
+        s_status_label = lv_label_create(scr);
+        lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
+        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_center(s_status_label);
+    }
+    lv_label_set_text(s_status_label, text);
+    lvgl_port_unlock();
 }

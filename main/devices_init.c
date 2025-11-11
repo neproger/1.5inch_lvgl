@@ -188,9 +188,9 @@ static esp_err_t app_lvgl_init(void)
         .hres = EXAMPLE_LCD_H_RES,
         .vres = EXAMPLE_LCD_V_RES,
         .monochrome = false,
-#if LVGL_VERSION_MAJOR >= 9
+    #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
-#endif
+    #endif
         .rotation = {
             .swap_xy = false,
             .mirror_x = false,
@@ -198,9 +198,9 @@ static esp_err_t app_lvgl_init(void)
         },
         .flags = {
             .buff_dma = true,
-#if LVGL_VERSION_MAJOR >= 9
+    #if LVGL_VERSION_MAJOR >= 9
             .swap_bytes = true,
-#endif
+    #endif
         }
     };
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
@@ -289,8 +289,8 @@ esp_err_t devices_init(void)
         };
         ESP_ERROR_CHECK(gpio_config(&bk_gpio_config));
         gpio_set_level(EXAMPLE_PIN_NUM_BK_LIGHT, EXAMPLE_LCD_BK_LIGHT_ON_LEVEL);
-    }
-
+}
+ 
     ESP_LOGI(TAG, "Initialize SPI/QSPI bus");
     const spi_bus_config_t buscfg =
         SH8601_PANEL_BUS_QSPI_CONFIG(EXAMPLE_PIN_NUM_LCD_PCLK, EXAMPLE_PIN_NUM_LCD_DATA0,
@@ -344,4 +344,24 @@ esp_err_t devices_init(void)
     button_init(BSP_BTN_PRESS);
 
     return ESP_OK;
+}
+
+// --- Backlight control ---
+esp_err_t devices_set_backlight_raw(uint8_t level)
+{
+    if (lcd_io == NULL) return ESP_ERR_INVALID_STATE;
+    // SH8601 uses DCS 0x51 for brightness. Ensure BCTRL enabled via 0x53 (done in init).
+    esp_err_t err;
+    lvgl_port_lock(-1);
+    err = esp_lcd_panel_io_tx_param(lcd_io, 0x51, &level, 1);
+    lvgl_port_unlock();
+    return err;
+}
+
+esp_err_t devices_set_backlight_percent(int percent)
+{
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    uint8_t level = (uint8_t)((percent * 255 + 50) / 100); // round
+    return devices_set_backlight_raw(level);
 }
