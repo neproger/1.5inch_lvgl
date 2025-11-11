@@ -86,8 +86,8 @@ static esp_err_t http_request(const char *method, const char *path,
     cfg.url = url;
     cfg.timeout_ms = 7000;
     cfg.disable_auto_redirect = false;
-    cfg.buffer_size = 1024;
-    cfg.buffer_size_tx = 512;
+    cfg.buffer_size = 2048;      // increase RX buffer for headers/body chunks
+    cfg.buffer_size_tx = 1024;   // increase TX buffer for small JSON bodies
     cfg.keep_alive_enable = true;
 
     if (is_https_url(url)) {
@@ -126,53 +126,67 @@ static esp_err_t http_request(const char *method, const char *path,
     snprintf(auth, sizeof(auth), "Bearer %s", s_token);
     esp_http_client_set_header(client, "Authorization", auth);
     esp_http_client_set_header(client, "Accept", "application/json");
+    esp_http_client_set_header(client, "Connection", "close");
+    esp_http_client_set_header(client, "Accept-Encoding", "identity");
     if (body) {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body, strlen(body));
     }
 
-    // Log the outgoing request
+    // Explicit open/write/fetch/read path for robust body retrieval
     size_t body_len = body ? strlen(body) : 0;
     int64_t t0_us = esp_timer_get_time();
     ESP_LOGI(TAG, "HTTP %s %s body=%uB", method, url, (unsigned)body_len);
 
     s_http_in_flight = true;
-    err = esp_http_client_perform(client);
+    err = esp_http_client_open(client, (int)body_len);
     if (err != ESP_OK) {
         int64_t dt_us = esp_timer_get_time() - t0_us;
-        ESP_LOGE(TAG, "HTTP %s %s -> err=%s (%.1f ms)",
+        ESP_LOGE(TAG, "HTTP open %s %s -> err=%s (%.1f ms)",
                  method, url, esp_err_to_name(err), (double)dt_us/1000.0);
         s_http_in_flight = false;
         esp_http_client_cleanup(client);
         free(url);
         return err;
     }
+    if (body_len > 0) {
+        int written = esp_http_client_write(client, body, (int)body_len);
+        if (written < 0 || (size_t)written != body_len) {
+            ESP_LOGE(TAG, "HTTP write failed (%d/%u)", written, (unsigned)body_len);
+            esp_http_client_close(client);
+            s_http_in_flight = false;
+            esp_http_client_cleanup(client);
+            free(url);
+            return ESP_FAIL;
+        }
+    }
 
+    int fetch_len = esp_http_client_fetch_headers(client);
     int status = esp_http_client_get_status_code(client);
     if (out_status_code) *out_status_code = status;
 
     if (out && out_len > 0) {
         int total_read = 0;
-        int content_len = esp_http_client_get_content_length(client);
         while (1) {
             int remain = (int)(out_len - 1 - total_read);
-            int to_read = remain > 1024 ? 1024 : (remain > 0 ? remain : 0);
-            if (to_read <= 0) break;
-            int r = esp_http_client_read(client, out + total_read, to_read);
-            if (r <= 0) break;
+            if (remain <= 0) break;
+            int r = esp_http_client_read(client, out + total_read, remain > 1024 ? 1024 : remain);
+            if (r <= 0) break; // 0 on EOF
             total_read += r;
-            if (content_len > 0 && total_read >= content_len) break;
         }
         out[total_read] = '\0';
         int64_t dt_us = esp_timer_get_time() - t0_us;
-        ESP_LOGI(TAG, "HTTP %s %s -> %d, recv=%dB (%.1f ms)",
-                 method, url, status, total_read, (double)dt_us/1000.0);
+        int content_len = esp_http_client_get_content_length(client);
+        ESP_LOGI(TAG, "HTTP %s %s -> %d, recv=%dB (%.1f ms) len=%d fetch=%d",
+                 method, url, status, total_read, (double)dt_us/1000.0, content_len, fetch_len);
     } else {
         int64_t dt_us = esp_timer_get_time() - t0_us;
         int content_len = esp_http_client_get_content_length(client);
         ESP_LOGI(TAG, "HTTP %s %s -> %d, len=%d (%.1f ms)",
                  method, url, status, content_len, (double)dt_us/1000.0);
     }
+
+    esp_http_client_close(client);
 
     if (status >= 200 && status < 300) { s_last_ok_us = esp_timer_get_time(); s_online = true; }
     esp_http_client_cleanup(client);

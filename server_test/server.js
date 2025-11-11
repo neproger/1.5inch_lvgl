@@ -111,6 +111,7 @@ app.get('/api/', (req, res) => {
 app.get('/api/states/:entityId', (req, res) => {
     const entityId = req.params.entityId;
     const obj = store.get(entityId);
+    console.log(obj)
     if (!obj) {
         return res.status(404).json({ message: `Entity ${entityId} not found` });
     }

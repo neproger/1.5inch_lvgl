@@ -135,12 +135,16 @@ static void ha_fetch_state_task(void *arg)
         return;
     }
     const char *entity = s_ui_items[idx].entity_id;
-    char buf[256];
+    char buf[512];
     int code = 0;
     esp_err_t err = ha_get_state(entity, buf, sizeof(buf), &code);
     if (err == ESP_OK && code == 200)
     {
-        ESP_LOGI(TAG_UI, "HA state raw (http=%d): %s", code, buf);
+        int recv_len = (int)strlen(buf);
+        ESP_LOGI(TAG_UI, "HA state raw (http=%d, bytes=%d): %s", code, recv_len, buf);
+        if (recv_len >= (int)sizeof(buf) - 1) {
+            ESP_LOGW(TAG_UI, "HA state response may be truncated (buffer=%u)", (unsigned)sizeof(buf));
+        }
         cJSON *root = cJSON_Parse(buf);
         if (root)
         {
@@ -301,10 +305,10 @@ static void handle_single_click(void)
 static void ha_toggle_task(void *arg)
 {
     (void)arg;
-    setLabel("TOGGLE...");
+    setInfo("TOGGLE...");
     if (!wifi_manager_is_connected())
     {
-        setLabel("No WiFi");
+        setInfo("No WiFi");
         s_ha_req_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -315,18 +319,20 @@ static void ha_toggle_task(void *arg)
     esp_err_t err = ha_toggle(entity, &code);
     if (err == ESP_OK && (code == 200 || code == 201 || code == 202))
     {
-        setLabel("TGL OK");
+        setInfo("TGL OK");
         s_last_toggle_us = esp_timer_get_time();
+        // After a short delay, refresh state from HA to reflect the result
+        vTaskDelay(pdMS_TO_TICKS(200));
+        if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected())
+        {
+            xTaskCreate(ha_fetch_state_task, "ha_state", 4096, (void *)(intptr_t)s_cur_item, 3, &s_ha_state_task);
+        }
     }
     else if (err == ESP_OK)
     {
         char msg[24];
         snprintf(msg, sizeof(msg), "TGL %d", code);
-        setLabel(msg);
-    }
-    else
-    {
-        setLabel("TGL ERR");
+        setInfo(msg);
     }
     s_ha_req_task = NULL;
     vTaskDelete(NULL);
