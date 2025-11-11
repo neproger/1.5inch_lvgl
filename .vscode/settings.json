@@ -22,5 +22,6 @@
     "--compile-commands-dir=c:\\Users\\ASUS\\ESP-TEST\\examples\\ESP-IDF\\1.5inch_lvgl_v9_port\\build"
   ],
   "idf.flashType": "UART",
-  "idf.portWin": "COM3"
+  "idf.portWin": "COM3",
+  "C_Cpp.errorSquiggles": "enabled"
 }

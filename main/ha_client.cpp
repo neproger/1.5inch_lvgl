@@ -5,7 +5,9 @@
 
 #include "esp_log.h"
 #include "esp_http_client.h"
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
+#endif
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -260,4 +262,3 @@ int64_t ha_client_get_no_status_until_us(void)
 {
     return s_no_status_until_us;
 }
-

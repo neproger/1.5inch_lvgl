@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
+#include "cJSON.h"
 #include "devices_init.h"
 
 static const char *TAG_UI = "UI";
@@ -139,31 +140,16 @@ static void ha_fetch_state_task(void *arg)
     esp_err_t err = ha_get_state(entity, buf, sizeof(buf), &code);
     if (err == ESP_OK && code == 200)
     {
-        const char *p = strstr(buf, "\"state\"");
-        setInfo("state");
-        if (p)
+        ESP_LOGI(TAG_UI, "HA state raw (http=%d): %s", code, buf);
+        cJSON *root = cJSON_Parse(buf);
+        if (root)
         {
-            p = strchr(p, ':');
-            if (p)
+            const cJSON *st = cJSON_GetObjectItemCaseSensitive(root, "state");
+            if (cJSON_IsString(st) && st->valuestring)
             {
-                p++;
-                while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
-                    p++;
-                if (*p == '"')
-                {
-                    const char *val = p + 1;
-                    const char *q = strchr(val, '"');
-                    if (q && q > val && (q - val) < 16)
-                    {
-                        char state[16];
-                        size_t n = (size_t)(q - val);
-                        memcpy(state, val, n);
-                        state[n] = '\0';
-                        // Show only the state in the secondary info line
-                        setInfo(state);
-                    }
-                }
+                setInfo(st->valuestring);
             }
+            cJSON_Delete(root);
         }
     }
     s_ha_state_task = NULL;

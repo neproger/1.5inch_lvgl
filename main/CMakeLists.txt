@@ -10,4 +10,19 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "../fonts"
+    REQUIRES
+        freertos
+        esp_timer
+        esp_http_client
+        esp-tls
+        esp_wifi
+        esp_event
+        esp_netif
+        nvs_flash
+        driver
+        esp_lcd
+        esp_lcd_touch
+        esp_lcd_sh8601
+        esp_lvgl_port
+        json
 )
