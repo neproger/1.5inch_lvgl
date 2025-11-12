@@ -24,5 +24,6 @@
   ],
   "idf.flashType": "UART",
   "idf.portWin": "COM3",
-  "C_Cpp.errorSquiggles": "enabled"
+  "C_Cpp.errorSquiggles": "enabled",
+  "C_Cpp.referencesCodeLens.enabled": false
 }
