@@ -1,0 +1,16 @@
+{
+  "name": "mqtt-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Simple TCP→TLS proxy for MQTT so constrained devices can talk to a TLS-only broker via local plain TCP.",
+  "main": "index.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {}
+}
+
