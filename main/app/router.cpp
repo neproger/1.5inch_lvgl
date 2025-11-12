@@ -2,6 +2,7 @@
 #include "core/store.hpp"
 #include "config/config.hpp"
 #include "infra/transport/mqtt_transport.hpp"
+#include "infra/network/wifi_manager.h"
 #include "services/ha_service.hpp"
 
 namespace {
@@ -42,6 +43,9 @@ esp_err_t start()
     if (s_cfg->entity_count == 0) {
         return ESP_ERR_INVALID_STATE;
     }
+
+    // Wait for network before starting MQTT to avoid early connect errors
+    (void)wifi_manager_wait_ip(10000);
 
     const char* ids[config::kMaxEntities] = {};
     for (int i = 0; i < s_cfg->entity_count; ++i) {
