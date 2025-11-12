@@ -3,86 +3,103 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "fonts.h"
-#include "ha_mqtt.hpp"
 #include "app/router.hpp"
-#include "ha_mqtt_config.h"
+#include "config/config.hpp"
 #include "core/store.hpp"
-#include "devices_init.h"
-#include "wifi_manager.h"
+#include "infra/device/devices_init.h"
+#include "infra/network/wifi_manager.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
-#include "cJSON.h"
 
 static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
 static lv_obj_t *s_status_ring = NULL;
 static lv_obj_t *s_info_label = NULL; /* Secondary info/description label */
-static TaskHandle_t s_ha_req_task = NULL;
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
 static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
-/* Multi-state UI: selectable HA entities + screensaver */
-typedef struct
-{
-    const char *name;      /* shown */
-    const char *entity_id; /* HA entity */
-} ui_item_t;
-
-static const ui_item_t s_ui_items[] = {
-    {"Кухня", "switch.wifi_breaker_t_switch_1"},
-    {"Коридор", "switch.wifi_breaker_t_switch_2"},
-};
-static const int s_ui_items_count = sizeof(s_ui_items) / sizeof(s_ui_items[0]);
+static constexpr int kMaxUiEntities = config::kMaxEntities;
+static int s_ui_items_count = 0;
 static int s_cur_item = 0;
+static const config::HaSettings *s_cfg = nullptr;
 
 static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
 static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
 
+static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool s_store_dirty = false;
+static bool s_store_connected = false;
+static char s_item_state[kMaxUiEntities][core::kEntityValueLen] = {};
+
 // Draw circular border positioned by center (cx, cy) and radius.
 static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
 static void handle_single_click(void);
 static void ha_ui_timer_cb(void *arg);
-static void ha_toggle_task(void *arg);
 static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
+static void init_state_defaults(void);
+static const config::Entity *get_entity(int index);
 void setInfo(const char *text);
 void setLabel(const char *text);
 
-static char s_item_state[s_ui_items_count][12] = {"-", "-"};
-static void ui_mqtt_on_msg(const char *topic, const char *data, int len)
+static void init_state_defaults(void)
 {
-    const char prefix[] = "ha/state/";
-    const size_t pfx_len = sizeof(prefix) - 1;
-    if (!topic)
-        return;
-    ESP_LOGI(TAG_UI, "MQTT msg received: topic='%s', len=%d, data='%.*s'", topic, len, len, data ? data : "");
-    if (strncmp(topic, prefix, pfx_len) != 0)
-        return;
-    const char *ent = topic + pfx_len;
-    for (int i = 0; i < s_ui_items_count; ++i)
+    portENTER_CRITICAL(&s_state_mux);
+    for (int i = 0; i < kMaxUiEntities; ++i)
     {
-        if (strcmp(ent, s_ui_items[i].entity_id) == 0)
-        {
-            int n = (len < (int)sizeof(s_item_state[i]) - 1) ? len : (int)sizeof(s_item_state[i]) - 1;
-            if (n < 0)
-                n = 0;
-            memcpy(s_item_state[i], data ? data : "", n);
-            s_item_state[i][n] = '\0';
-            if (i == s_cur_item)
-            {
-                setInfo(s_item_state[i]);
-            }
-            break;
-        }
+        s_item_state[i][0] = '-';
+        s_item_state[i][1] = '\0';
     }
+    s_store_connected = false;
+    s_store_dirty = true;
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
+static void copy_entity_value(int index, char *dst, size_t dst_len)
+{
+    if (!dst || dst_len == 0)
+        return;
+    portENTER_CRITICAL(&s_state_mux);
+    if (index >= 0 && index < s_ui_items_count)
+    {
+        strncpy(dst, s_item_state[index], dst_len - 1);
+        dst[dst_len - 1] = '\0';
+    }
+    else
+    {
+        dst[0] = '\0';
+    }
+    portEXIT_CRITICAL(&s_state_mux);
+}
+
+static const config::Entity *get_entity(int index)
+{
+    if (!s_cfg)
+        return nullptr;
+    if (index < 0 || index >= s_ui_items_count)
+        return nullptr;
+    return &s_cfg->entities[index];
 }
 
 extern "C" void ui_app_init(void)
 {
+    if (config::load() != ESP_OK)
+    {
+        ESP_LOGE(TAG_UI, "Config load failed");
+        return;
+    }
+    s_cfg = &config::ha();
+    s_ui_items_count = s_cfg->entity_count;
+    if (s_ui_items_count <= 0)
+        s_ui_items_count = 1;
+    s_cur_item %= s_ui_items_count;
+
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
@@ -92,6 +109,8 @@ extern "C" void ui_app_init(void)
     lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
     lv_obj_set_style_text_font(title, &Montserrat_20, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
+
+    init_state_defaults();
 
     /* Initial selection shown */
     s_last_input_us = esp_timer_get_time();
@@ -118,25 +137,38 @@ extern "C" void ui_app_init(void)
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    // Subscribe to state topics for each configured entity
-    ha_mqtt::set_message_handler(&ui_mqtt_on_msg);
-    for (int i = 0; i < s_ui_items_count; ++i)
-    {
-        char topic[128];
-        snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
-        ha_mqtt::subscribe(topic, 1);
-    }
-
-    // Subscribe to store for connection updates (optional; timer also updates ring)
+    // Subscribe to store for state/connection updates
     core::store_subscribe([](const core::AppState &st) {
-        s_last_online = st.connected;
+        portENTER_CRITICAL(&s_state_mux);
+        s_store_connected = st.connected;
+        int count = st.entity_count;
+        if (count > s_ui_items_count)
+            count = s_ui_items_count;
+        for (int i = 0; i < count; ++i)
+        {
+            strncpy(s_item_state[i], st.entities[i].value, sizeof(s_item_state[i]) - 1);
+            s_item_state[i][sizeof(s_item_state[i]) - 1] = '\0';
+        }
+        s_store_dirty = true;
+        portEXIT_CRITICAL(&s_state_mux);
     });
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
-    bool online = router::is_connected();
+    bool online = false;
+    bool needs_refresh = false;
+
+    portENTER_CRITICAL(&s_state_mux);
+    if (s_store_dirty)
+    {
+        s_store_dirty = false;
+        needs_refresh = true;
+    }
+    online = s_store_connected;
+    portEXIT_CRITICAL(&s_state_mux);
+
     if (!s_screensaver && online != s_last_online && s_status_ring)
     {
         lvgl_port_lock(-1);
@@ -144,6 +176,12 @@ static void ha_ui_timer_cb(void *arg)
         lv_obj_set_style_border_color(s_status_ring, col, 0);
         lvgl_port_unlock();
         s_last_online = online;
+        needs_refresh = true;
+    }
+
+    if (needs_refresh && !s_screensaver)
+    {
+        ui_show_current_item();
     }
 }
 
@@ -158,6 +196,8 @@ static const char *knob_event_table[] = {
 extern "C" void LVGL_knob_event(void *event)
 {
     int ev = (int)(intptr_t)event;
+    if (s_ui_items_count <= 0)
+        return;
     s_last_input_us = esp_timer_get_time();
     if (s_screensaver)
     {
@@ -177,7 +217,9 @@ extern "C" void LVGL_knob_event(void *event)
     default:
         break;
     }
-    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
+    const config::Entity *ent = get_entity(s_cur_item);
+    const char *ename = ent ? ent->name : "N/A";
+    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, ename);
 }
 
 static const char *button_event_table[] = {
@@ -237,46 +279,43 @@ static void handle_single_click(void)
         setLabel("No MQTT");
         return;
     }
-    if (s_ha_req_task == NULL)
-    {
-        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
-        if (ok != pdPASS)
-        {
-            ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
-        }
-    }
-}
-
-static void ha_toggle_task(void *arg)
-{
-    (void)arg;
-    setInfo("-");
     if (!wifi_manager_is_connected())
     {
         setInfo("No WiFi");
-        s_ha_req_task = NULL;
-        vTaskDelete(NULL);
         return;
     }
-    const char *entity = s_ui_items[s_cur_item].entity_id;
-    esp_err_t err = router::toggle(entity);
+    const config::Entity *ent = get_entity(s_cur_item);
+    if (!ent)
+    {
+        setInfo("No entity");
+        return;
+    }
+    esp_err_t err = router::toggle(ent->entity_id);
     if (err == ESP_OK)
     {
         s_last_toggle_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGI(TAG_UI, "Toggle sent for %s", ent->entity_id);
     }
     else
     {
+        ESP_LOGW(TAG_UI, "Toggle failed for %s: %s", ent->entity_id, esp_err_to_name(err));
         setInfo("MQTT ERR");
     }
-    s_ha_req_task = NULL;
-    vTaskDelete(NULL);
 }
 
 static void ui_show_current_item(void)
 {
-    setLabel(s_ui_items[s_cur_item].name);
-    setInfo(s_item_state[s_cur_item]);
+    char value[core::kEntityValueLen];
+    copy_entity_value(s_cur_item, value, sizeof(value));
+    if (value[0] == '\0')
+    {
+        value[0] = '-';
+        value[1] = '\0';
+    }
+    const config::Entity *ent = get_entity(s_cur_item);
+    const char *label = (ent && ent->name[0]) ? ent->name : "Entity";
+    setLabel(label);
+    setInfo(value);
 }
 
 static void ui_enter_screensaver(void)
@@ -294,6 +333,11 @@ static void ui_enter_screensaver(void)
 static void ui_exit_screensaver(void)
 {
     s_screensaver = false;
+    bool online_snapshot = false;
+    portENTER_CRITICAL(&s_state_mux);
+    online_snapshot = s_store_connected;
+    portEXIT_CRITICAL(&s_state_mux);
+    s_last_online = online_snapshot;
     devices_set_backlight_percent(90);
     lvgl_port_lock(-1);
     if (s_status_ring)

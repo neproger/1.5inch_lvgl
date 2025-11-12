@@ -1,17 +1,22 @@
 idf_component_register(
     SRCS
         "main.cpp"
-        "devices_init.c"
-        "ui_app.cpp"
+        "infra/device/devices_init.c"
+        "ui/ui_app.cpp"
         
-        "wifi_manager.c"
-        "ha_mqtt.cpp"
+        "infra/network/wifi_manager.c"
+        "infra/transport/ha_mqtt.cpp"
         "app/router.cpp"
         "core/store.cpp"
-        "http_utils.cpp"
+        "config/config.cpp"
+        "infra/transport/mqtt_transport.cpp"
+        "services/ha_service.cpp"
+        "infra/transport/http_utils.cpp"
        
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
+    EMBED_TXTFILES
+        "config/home_assistant.yaml"
     INCLUDE_DIRS
         "."
         "../fonts"

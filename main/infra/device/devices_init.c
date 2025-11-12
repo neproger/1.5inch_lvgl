@@ -24,7 +24,7 @@
 #include "esp_lcd_touch_cst816s.h"
 
 #include "devices_init.h"
-#include "ui_app.h"
+#include "ui/ui_app.h"
 
 // Optional debug task can conflict with LVGL touch polling; keep disabled by default
 #define ENABLE_TOUCH_DEBUG 0

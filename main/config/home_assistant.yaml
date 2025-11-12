@@ -1,0 +1,15 @@
+# MQTT и сущности для Home Assistant UI
+mqtt:
+  uri: "mqtt://192.168.1.185:1883" # "mqtt://192.168.0.105:1884"
+  username: "mqtt_user"
+  password: "mqtt_user_123"
+  client_id: "esp32-kazdev-ui"
+  base_topic: "ha"
+
+entities:
+  - name: "Свет в кухне"
+    id: "switch.wifi_breaker_t_switch_1"
+    type: "switch"
+  - name: "Свет в коридоре"
+    id: "switch.wifi_breaker_t_switch_2"
+    type: "switch"

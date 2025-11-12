@@ -10,7 +10,7 @@
 #include "esp_crt_bundle.h"
 #endif
 
-#include "wifi_manager.h"
+#include "infra/network/wifi_manager.h"
 #include "http_utils.h"
 
 static const char *TAG_HTTP = "http_utils";

@@ -1,5 +1,5 @@
-#include "devices_init.h"
-#include "ui_app.h"
+#include "infra/device/devices_init.h"
+#include "ui/ui_app.h"
 #include "esp_err.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
@@ -8,7 +8,7 @@
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include <stdbool.h>
-#include "wifi_manager.h"
+#include "infra/network/wifi_manager.h"
 #include "app/router.hpp"
 
 extern "C" void app_main(void)
