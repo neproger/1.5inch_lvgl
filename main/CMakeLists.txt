@@ -3,10 +3,10 @@ idf_component_register(
         "main.cpp"
         "devices_init.c"
         "ui_app.cpp"
-       
+        
         "wifi_manager.c"
-        "ha_client.cpp"
         "ha_mqtt.cpp"
+        "http_utils.cpp"
        
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"

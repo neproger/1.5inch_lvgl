@@ -3,7 +3,6 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "fonts.h"
-#include "ha_client.h"
 #include "ha_mqtt.hpp"
 #include "ha_mqtt_config.h"
 #include "devices_init.h"
@@ -18,9 +17,7 @@ static lv_obj_t *s_status_label = NULL;
 static lv_obj_t *s_status_ring = NULL;
 static lv_obj_t *s_info_label = NULL; /* Secondary info/description label */
 static TaskHandle_t s_ha_req_task = NULL;
-static TaskHandle_t s_ha_state_task = NULL;     /* background state fetch */
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
-static TaskHandle_t s_ha_status_task = NULL;    /* background HA pinger */
 static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
@@ -229,19 +226,11 @@ static void handle_single_click(void)
         setLabel("WAIT");
         return;
     }
-#if HA_USE_MQTT
     if (!ha_mqtt::is_connected())
     {
         setLabel("No MQTT");
         return;
     }
-#else
-    if (!ha_client_is_online())
-    {
-        setLabel("No HA");
-        return;
-    }
-#endif
     if (s_ha_req_task == NULL)
     {
         BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
@@ -263,7 +252,6 @@ static void ha_toggle_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-#if HA_USE_MQTT
     const char *entity = s_ui_items[s_cur_item].entity_id;
     esp_err_t err = ha_mqtt::publish_toggle(entity);
     if (err == ESP_OK)
@@ -275,26 +263,6 @@ static void ha_toggle_task(void *arg)
     {
         setInfo("MQTT ERR");
     }
-#else
-    int code = 0;
-    const char *entity = s_ui_items[s_cur_item].entity_id;
-    esp_err_t err = ha_toggle(entity, &code);
-    if (err == ESP_OK && (code == 200 || code == 201 || code == 202))
-    {
-        s_last_toggle_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(200));
-        if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected())
-        {
-            xTaskCreate(ha_fetch_state_task, "ha_state", 4096, (void *)(intptr_t)s_cur_item, 3, &s_ha_state_task);
-        }
-    }
-    else if (err == ESP_OK)
-    {
-        char msg[24];
-        snprintf(msg, sizeof(msg), "TGL %d", code);
-        setInfo(msg);
-    }
-#endif
     s_ha_req_task = NULL;
     vTaskDelete(NULL);
 }
@@ -302,14 +270,7 @@ static void ha_toggle_task(void *arg)
 static void ui_show_current_item(void)
 {
     setLabel(s_ui_items[s_cur_item].name);
-#if HA_USE_MQTT
     setInfo(s_item_state[s_cur_item]);
-#else
-    if (!s_screensaver && s_ha_state_task == NULL && wifi_manager_is_connected())
-    {
-        xTaskCreate(ha_fetch_state_task, "ha_state", 4096, (void *)(intptr_t)s_cur_item, 3, &s_ha_state_task);
-    }
-#endif
 }
 
 static void ui_enter_screensaver(void)
