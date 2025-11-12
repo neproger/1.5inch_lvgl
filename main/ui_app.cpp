@@ -4,7 +4,9 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "ha_mqtt.hpp"
+#include "app/router.hpp"
 #include "ha_mqtt_config.h"
+#include "core/store.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
 #include <cstdint>
@@ -124,13 +126,17 @@ extern "C" void ui_app_init(void)
         snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
         ha_mqtt::subscribe(topic, 1);
     }
+
+    // Subscribe to store for connection updates (optional; timer also updates ring)
+    core::store_subscribe([](const core::AppState &st) {
+        s_last_online = st.connected;
+    });
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
-    bool online = false;
-    online = ha_mqtt::is_connected();
+    bool online = router::is_connected();
     if (!s_screensaver && online != s_last_online && s_status_ring)
     {
         lvgl_port_lock(-1);
@@ -226,7 +232,7 @@ static void handle_single_click(void)
         setLabel("WAIT");
         return;
     }
-    if (!ha_mqtt::is_connected())
+    if (!router::is_connected())
     {
         setLabel("No MQTT");
         return;
@@ -253,7 +259,7 @@ static void ha_toggle_task(void *arg)
         return;
     }
     const char *entity = s_ui_items[s_cur_item].entity_id;
-    esp_err_t err = ha_mqtt::publish_toggle(entity);
+    esp_err_t err = router::toggle(entity);
     if (err == ESP_OK)
     {
         s_last_toggle_us = esp_timer_get_time();
