@@ -7,7 +7,8 @@
     "ui_helpers.h": "c",
     "ui_events.h": "c",
     "lvgl.h": "c",
-    "sdkconfig.h": "c"
+    "sdkconfig.h": "c",
+    "*.inc": "cpp"
   },
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"

@@ -6,11 +6,13 @@
   "main": "index.js",
   "license": "UNLICENSED",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "broker": "node broker.js"
   },
   "engines": {
     "node": ">=14"
   },
-  "dependencies": {}
+  "dependencies": {
+    "aedes": "^0.51.2"
+  }
 }
-

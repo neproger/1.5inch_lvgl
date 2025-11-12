@@ -9,7 +9,7 @@
 
 // Example: "mqtt://192.168.1.185:1883" or "mqtts://host:8883"
 #ifndef HA_MQTT_URI
-#define HA_MQTT_URI "mqtt://192.168.1.185:1883"
+#define HA_MQTT_URI "mqtt://192.168.0.105:1884"//"mqtt://192.168.1.185:1883"
 #endif
 
 // If your broker requires authentication, set these; empty means no auth in URI

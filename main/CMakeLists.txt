@@ -25,6 +25,7 @@ idf_component_register(
         driver
         esp_lcd
         esp_lcd_touch
+        espressif__esp_lcd_touch_cst816s
         esp_lcd_sh8601
         esp_lvgl_port
         json

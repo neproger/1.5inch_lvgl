@@ -21,9 +21,13 @@
 
 #include "esp_lcd_sh8601.h"
 #include "esp_lcd_touch.h"
+#include "esp_lcd_touch_cst816s.h"
 
 #include "devices_init.h"
 #include "ui_app.h"
+
+// Optional debug task can conflict with LVGL touch polling; keep disabled by default
+#define ENABLE_TOUCH_DEBUG 0
 
 static const char *TAG = "devices";
 
@@ -34,6 +38,7 @@ static esp_lcd_panel_handle_t lcd_panel = NULL;
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
+static TaskHandle_t s_touch_dbg_task = NULL;
 
 /* Backlight PWM (LEDC) */
 static bool s_bk_ledc_inited = false;
@@ -59,71 +64,72 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Hardware configuration ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define EXAMPLE_LCD_HOST                  (SPI2_HOST)
-#define EXAMPLE_LCD_BITS_PER_PIXEL        (16)
-#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE      (0)
-#define EXAMPLE_LCD_LVGL_AVOID_TEAR       (1)
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT      (160)
+#define EXAMPLE_LCD_HOST (SPI2_HOST)
+#define EXAMPLE_LCD_BITS_PER_PIXEL (16)
+#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)
+#define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)
+#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (160)
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
-#define EXAMPLE_LCD_SPI_SPEED_MHZ         (40)   /* Was 40 MHz; 26 MHz is safer */
-#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH     (1)    /* Limit in-flight DMA transactions */
-#define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL     1
-#define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL    !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL
-#define EXAMPLE_PIN_NUM_LCD_CS            (GPIO_NUM_12)
-#define EXAMPLE_PIN_NUM_LCD_PCLK          (GPIO_NUM_10)
-#define EXAMPLE_PIN_NUM_LCD_DATA0         (GPIO_NUM_13)
-#define EXAMPLE_PIN_NUM_LCD_DATA1         (GPIO_NUM_11)
-#define EXAMPLE_PIN_NUM_LCD_DATA2         (GPIO_NUM_14)
-#define EXAMPLE_PIN_NUM_LCD_DATA3         (GPIO_NUM_9)
-#define EXAMPLE_PIN_NUM_LCD_RST           (GPIO_NUM_8)
-#define EXAMPLE_PIN_NUM_BK_LIGHT          (GPIO_NUM_17)
+#define EXAMPLE_LCD_SPI_SPEED_MHZ (40)    /* Was 40 MHz; 26 MHz is safer */
+#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1) /* Limit in-flight DMA transactions */
+#define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL 1
+#define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL
+#define EXAMPLE_PIN_NUM_LCD_CS (GPIO_NUM_12)
+#define EXAMPLE_PIN_NUM_LCD_PCLK (GPIO_NUM_10)
+#define EXAMPLE_PIN_NUM_LCD_DATA0 (GPIO_NUM_13)
+#define EXAMPLE_PIN_NUM_LCD_DATA1 (GPIO_NUM_11)
+#define EXAMPLE_PIN_NUM_LCD_DATA2 (GPIO_NUM_14)
+#define EXAMPLE_PIN_NUM_LCD_DATA3 (GPIO_NUM_9)
+#define EXAMPLE_PIN_NUM_LCD_RST (GPIO_NUM_8)
+#define EXAMPLE_PIN_NUM_BK_LIGHT (GPIO_NUM_17)
 
-#define EXAMPLE_LCD_H_RES                 478
-#define EXAMPLE_LCD_V_RES                 466
+#define EXAMPLE_LCD_H_RES 478
+#define EXAMPLE_LCD_V_RES 466
 
 #if CONFIG_LV_COLOR_DEPTH == 32
-#define LCD_BIT_PER_PIXEL       (24)
+#define LCD_BIT_PER_PIXEL (24)
 #elif CONFIG_LV_COLOR_DEPTH == 16
-#define LCD_BIT_PER_PIXEL       (16)
+#define LCD_BIT_PER_PIXEL (16)
 #endif
 
 /* Touch */
-#define EXAMPLE_TOUCH_HOST                 (I2C_NUM_0)
-#define EXAMPLE_TOUCH_I2C_NUM              (0)
-#define EXAMPLE_TOUCH_I2C_CLK_HZ           (100000) /* Lower speed for stability */
-#define EXAMPLE_PIN_NUM_TOUCH_SCL          (GPIO_NUM_3)
-#define EXAMPLE_PIN_NUM_TOUCH_SDA          (GPIO_NUM_1)
-#define EXAMPLE_PIN_NUM_TOUCH_RST          (GPIO_NUM_2)
-#define EXAMPLE_PIN_NUM_TOUCH_INT          (GPIO_NUM_4)
+#define EXAMPLE_TOUCH_HOST (I2C_NUM_0)
+#define EXAMPLE_TOUCH_I2C_NUM (0)
+#define EXAMPLE_TOUCH_I2C_CLK_HZ (100000) /* Lower speed for stability */
+#define EXAMPLE_PIN_NUM_TOUCH_SCL (GPIO_NUM_3)
+#define EXAMPLE_PIN_NUM_TOUCH_SDA (GPIO_NUM_1)
+#define EXAMPLE_PIN_NUM_TOUCH_RST (GPIO_NUM_2)
+#define EXAMPLE_PIN_NUM_TOUCH_INT (GPIO_NUM_4)
 
 /* Inputs */
-typedef enum {
+typedef enum
+{
     BSP_BTN_PRESS = GPIO_NUM_0,
 } bsp_button_t;
 
-#define BSP_ENCODER_A         (GPIO_NUM_6)
-#define BSP_ENCODER_B         (GPIO_NUM_5)
+#define BSP_ENCODER_A (GPIO_NUM_6)
+#define BSP_ENCODER_B (GPIO_NUM_5)
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Panel vendor init commands (SH8601) //////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
-    {0xFE, (uint8_t []){0x00}, 0, 0},
-    {0xC4, (uint8_t []){0x80}, 1, 0},
-    {0x3A, (uint8_t []){0x55}, 1, 0},
-    {0x35, (uint8_t []){0x00}, 0, 10},
-    {0x53, (uint8_t []){0x20}, 1, 10},
-    {0x51, (uint8_t []){0xFF}, 1, 10},
-    {0x63, (uint8_t []){0xFF}, 1, 10},
+    {0xFE, (uint8_t[]){0x00}, 0, 0},
+    {0xC4, (uint8_t[]){0x80}, 1, 0},
+    {0x3A, (uint8_t[]){0x55}, 1, 0},
+    {0x35, (uint8_t[]){0x00}, 0, 10},
+    {0x53, (uint8_t[]){0x20}, 1, 10},
+    {0x51, (uint8_t[]){0xFF}, 1, 10},
+    {0x63, (uint8_t[]){0xFF}, 1, 10},
     /* Address window: revert to vendor defaults used previously
      * Columns: start=6, end=477  (0x0006 .. 0x01DD) -> width 472
      * Rows:    start=0, end=465  (0x0000 .. 0x01D1) -> height 466
      * Fine alignment is handled via esp_lcd_panel_set_gap below.
      */
-    {0x2A, (uint8_t []){0x00,0x06,0x01,0xDD}, 4, 0},
-    {0x2B, (uint8_t []){0x00,0x00,0x01,0xD1}, 4, 0},
-    {0x11, (uint8_t []){0x00}, 0, 60},
-    {0x29, (uint8_t []){0x00}, 0, 0},
+    {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xDD}, 4, 0},
+    {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 0},
+    {0x11, (uint8_t[]){0x00}, 0, 60},
+    {0x29, (uint8_t[]){0x00}, 0, 0},
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -134,11 +140,10 @@ static esp_err_t app_touch_init(void)
     const i2c_config_t i2c_conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = EXAMPLE_PIN_NUM_TOUCH_SDA,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,   /* Enable internal pull-ups unless external exist */
+        .sda_pullup_en = GPIO_PULLUP_ENABLE, /* Enable internal pull-ups unless external exist */
         .scl_io_num = EXAMPLE_PIN_NUM_TOUCH_SCL,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,   /* Enable internal pull-ups unless external exist */
-        .master.clk_speed = EXAMPLE_TOUCH_I2C_CLK_HZ
-    };
+        .scl_pullup_en = GPIO_PULLUP_ENABLE, /* Enable internal pull-ups unless external exist */
+        .master.clk_speed = EXAMPLE_TOUCH_I2C_CLK_HZ};
     ESP_RETURN_ON_ERROR(i2c_param_config(EXAMPLE_TOUCH_I2C_NUM, &i2c_conf), TAG, "I2C configuration failed");
     ESP_RETURN_ON_ERROR(i2c_driver_install(EXAMPLE_TOUCH_I2C_NUM, i2c_conf.mode, 0, 0, 0), TAG, "I2C initialization failed");
 
@@ -159,6 +164,7 @@ static esp_err_t app_touch_init(void)
         .int_gpio_num = EXAMPLE_PIN_NUM_TOUCH_INT,
         .levels = {
             .reset = 0,
+            /* CST816S drives INT low on touch pulse, so falling edge */
             .interrupt = 0,
         },
         .flags = {
@@ -172,6 +178,7 @@ static esp_err_t app_touch_init(void)
     const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)EXAMPLE_TOUCH_I2C_NUM, &tp_io_config, &tp_io_handle), TAG, "new_panel_io_i2c failed");
     return esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &touch_handle);
+
 #else
     ESP_LOGW(TAG, "CST816S touch driver not available, skipping touch init");
     (void)tp_io_handle;
@@ -201,9 +208,9 @@ static esp_err_t app_lvgl_init(void)
         .hres = EXAMPLE_LCD_H_RES,
         .vres = EXAMPLE_LCD_V_RES,
         .monochrome = false,
-    #if LVGL_VERSION_MAJOR >= 9
+#if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
-    #endif
+#endif
         .rotation = {
             .swap_xy = false,
             .mirror_x = false,
@@ -211,11 +218,10 @@ static esp_err_t app_lvgl_init(void)
         },
         .flags = {
             .buff_dma = true,
-    #if LVGL_VERSION_MAJOR >= 9
+#if LVGL_VERSION_MAJOR >= 9
             .swap_bytes = true,
-    #endif
-        }
-    };
+#endif
+        }};
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
 
     /* Register rounder callback under LVGL mutex to avoid race */
@@ -223,13 +229,16 @@ static esp_err_t app_lvgl_init(void)
     lv_display_add_event_cb(lvgl_disp, sh8601_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lvgl_port_unlock();
 
-    if (touch_handle) {
+    if (touch_handle)
+    {
         const lvgl_port_touch_cfg_t touch_cfg = {
             .disp = lvgl_disp,
             .handle = touch_handle,
         };
         lvgl_touch_indev = lvgl_port_add_touch(&touch_cfg);
-    } else {
+    }
+    else
+    {
         ESP_LOGW(TAG, "LVGL touch not added: no touch handle");
     }
 
@@ -299,7 +308,8 @@ static void button_init(uint32_t button_num)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 esp_err_t devices_init(void)
 {
-    if (EXAMPLE_PIN_NUM_BK_LIGHT >= 0) {
+    if (EXAMPLE_PIN_NUM_BK_LIGHT >= 0)
+    {
         // Configure LEDC for PWM backlight control
         ledc_timer_config_t tcfg = {
             .speed_mode = s_bk_ledc_mode,
@@ -326,7 +336,7 @@ esp_err_t devices_init(void)
         ESP_ERROR_CHECK(ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel));
         s_bk_ledc_inited = true;
     }
- 
+
     ESP_LOGI(TAG, "Initialize SPI/QSPI bus");
     const spi_bus_config_t buscfg =
         SH8601_PANEL_BUS_QSPI_CONFIG(EXAMPLE_PIN_NUM_LCD_PCLK, EXAMPLE_PIN_NUM_LCD_DATA0,
@@ -372,7 +382,6 @@ esp_err_t devices_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
-    /* Reduce noisy touch logs (optional): set CST816S tag to WARN */
     esp_log_level_set("CST816S", ESP_LOG_WARN);
     ESP_ERROR_CHECK(app_lvgl_init());
 
@@ -386,17 +395,20 @@ esp_err_t devices_init(void)
 esp_err_t devices_set_backlight_raw(uint8_t level)
 {
     // Prefer PWM via LEDC; fall back to DCS 0x51 if LEDC not available
-    if (s_bk_ledc_inited) {
+    if (s_bk_ledc_inited)
+    {
         uint32_t duty = level; // 0..255
         // Handle active-low backlight if needed
-        if (!EXAMPLE_LCD_BK_LIGHT_ON_LEVEL) {
+        if (!EXAMPLE_LCD_BK_LIGHT_ON_LEVEL)
+        {
             duty = 255 - duty;
         }
         esp_err_t e1 = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, duty);
         esp_err_t e2 = ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
         return (e1 != ESP_OK) ? e1 : e2;
     }
-    if (lcd_io == NULL) return ESP_ERR_INVALID_STATE;
+    if (lcd_io == NULL)
+        return ESP_ERR_INVALID_STATE;
     // SH8601 DCS brightness
     esp_err_t err;
     lvgl_port_lock(-1);
@@ -407,8 +419,10 @@ esp_err_t devices_set_backlight_raw(uint8_t level)
 
 esp_err_t devices_set_backlight_percent(int percent)
 {
-    if (percent < 0) percent = 0;
-    if (percent > 100) percent = 100;
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
     uint8_t level = (uint8_t)((percent * 255 + 50) / 100); // round
     return devices_set_backlight_raw(level);
 }
