@@ -86,7 +86,7 @@ void store_subscribe(StateListener cb)
         }
     }
 }
-
+#include "esp_log.h"
 void store_dispatch_connected(bool connected)
 {
     if (!s_q) return;

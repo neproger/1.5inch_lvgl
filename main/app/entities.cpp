@@ -3,8 +3,8 @@
 namespace app {
 
 const EntityDesc g_entities[] = {
-    {"�?�?�:�?�?", "switch.wifi_breaker_t_switch_1"},
-    {"�?�?�?�?�?", "switch.wifi_breaker_t_switch_2"},
+    {"Свет на кухне", "switch.wifi_breaker_t_switch_1"},
+    {"Свет в коридоре", "switch.wifi_breaker_t_switch_2"},
 };
 
 const int g_entity_count = sizeof(g_entities) / sizeof(g_entities[0]);

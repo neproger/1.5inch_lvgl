@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include <cstring>
 #include <cstdio>
+#include "esp_log.h"
 
 namespace {
 TaskHandle_t s_mon_task = nullptr;
@@ -35,6 +36,7 @@ void monitor_task(void*)
 }
 
 namespace router {
+#include "wifi_manager.h"
 
 esp_err_t start()
 {
@@ -46,7 +48,9 @@ esp_err_t start()
     for (int i = 0; i < count; ++i) ids[i] = app::g_entities[i].entity_id;
     core::store_init_entities(ids, count);
     esp_err_t err = ha_mqtt::start();
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        ESP_LOGE("app", "MQTT start failed: %s", esp_err_to_name(err));
+    }
     ha_mqtt::set_message_handler(&on_mqtt_msg);
     for (int i = 0; i < count; ++i) {
         char topic[128];
@@ -68,7 +72,11 @@ bool is_connected()
 
 esp_err_t toggle(const char* entity_id)
 {
-    return ha_mqtt::publish_toggle(entity_id);
+    esp_err_t err = ha_mqtt::publish_toggle(entity_id);
+    if (err != ESP_OK) {
+        ESP_LOGE("app", "Failed to publish toggle: %s", esp_err_to_name(err));
+    }
+    return err;
 }
 
 } // namespace router

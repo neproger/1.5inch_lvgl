@@ -12,6 +12,8 @@
 #include <cstring>
 #include <cmath>
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
@@ -42,8 +44,6 @@ static void ui_refresh_current_state(void);
 static void store_listener(const core::AppState &st);
 void setInfo(const char *text);
 void setLabel(const char *text);
-
-
 
 extern "C" void ui_app_init(void)
 {
@@ -211,7 +211,7 @@ static void handle_single_click(void)
     }
     if (s_ha_req_task == NULL)
     {
-        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
+        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 4096, NULL, 4, &s_ha_req_task);
         if (ok != pdPASS)
         {
             ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
@@ -222,7 +222,7 @@ static void handle_single_click(void)
 static void ha_toggle_task(void *arg)
 {
     (void)arg;
-    setInfo("-");
+    setInfo("...");
     if (!wifi_manager_is_connected())
     {
         setInfo("No WiFi");
@@ -365,5 +365,3 @@ void setInfo(const char *text)
     }
     lvgl_port_unlock();
 }
-
-

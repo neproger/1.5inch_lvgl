@@ -20,12 +20,10 @@ extern "C" void app_main(void)
     // Wi‑Fi: инициализация и запуск авто‑поиска/подключения
     if (wifi_manager_init() == ESP_OK) {
         wifi_manager_start_auto(-85, 15000); // каждые 15с пробуем, если не подключены
+        (void)router::start(); // Start connectivity via Router (currently MQTT)
     } else {
         ESP_LOGW("app", "WiFi init failed");
     }
-
-    // Start connectivity via Router (currently MQTT)
-    (void)router::start();
 
     /* Create your UI under LVGL mutex */
     lvgl_port_lock(0);
