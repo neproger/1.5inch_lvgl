@@ -222,7 +222,7 @@ static void handle_single_click(void)
 static void ha_toggle_task(void *arg)
 {
     (void)arg;
-    setInfo("...");
+    // setInfo("...");
     if (!wifi_manager_is_connected())
     {
         setInfo("No WiFi");

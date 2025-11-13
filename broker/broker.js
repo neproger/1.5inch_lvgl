@@ -60,6 +60,7 @@ const BROKER_LOG_MAX_BYTES = Number(getStr('BROKER_LOG_MAX_BYTES', '256'));
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
     aedes.authenticate = (client, username, password, done) => {
+        console.log("Authenticate: ", username, password)
         const pwd = password ? password.toString('utf8') : '';
         const ok = username === BROKER_USERNAME && pwd === BROKER_PASSWORD;
         if (!ok) return done(new Error('Auth failed'), false);
@@ -119,7 +120,7 @@ aedes.on('publish', (packet, client) => {
     // Реагируем только на команды от клиента, а не на собственные публикации брокера
      if (client && packet.topic === 'ha/cmd/toggle') {
         const entityId = plBuf.toString('utf8').trim();
-        console.log(`[logic] toggle requested for "${entityId}"`);
+        // console.log(`[logic] toggle requested for "${entityId}"`);
 
         // если такой entity отслеживается – переключаем его самого
         if (entityStates[entityId] !== undefined) {
@@ -128,9 +129,9 @@ aedes.on('publish', (packet, client) => {
             const stateTopic = `ha/state/${entityId}`;
             const statePayload = Buffer.from(newState, 'utf8');
 
-            console.log(
-                `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
-            );
+            // console.log(
+            //     `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
+            // );
 
             aedes.publish({
                 topic: stateTopic,
