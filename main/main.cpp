@@ -13,15 +13,19 @@
 
 extern "C" void app_main(void)
 {
-    if (devices_init() != ESP_OK) {
+    if (devices_init() != ESP_OK)
+    {
         return;
     }
 
     // Wi‑Fi: инициализация и запуск авто‑поиска/подключения
-    if (wifi_manager_init() == ESP_OK) {
+    if (wifi_manager_init() == ESP_OK)
+    {
         wifi_manager_start_auto(-85, 15000); // каждые 15с пробуем, если не подключены
-        (void)router::start(); // Start connectivity via Router (currently MQTT)
-    } else {
+        (void)router::start();               // Start connectivity via Router (currently MQTT)
+    }
+    else
+    {
         ESP_LOGW("app", "WiFi init failed");
     }
 
