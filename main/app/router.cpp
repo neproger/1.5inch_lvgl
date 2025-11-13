@@ -10,6 +10,7 @@
 
 namespace
 {
+    static const char *TAG = "router";
     TaskHandle_t s_mon_task = nullptr;
     bool s_last_conn = false;
 
@@ -17,6 +18,15 @@ namespace
     {
         if (!topic)
             return;
+
+        // 1. Логируем вообще всё, что прилетает с брокера
+        // data может быть бинарным и не нуль-терминированным, поэтому %.*s
+        ESP_LOGI(TAG, "MQTT RX topic='%s' payload='%.*s' (len=%d)",
+                 topic,
+                 len,
+                 (const char *)data,
+                 len);
+
         const char prefix[] = "ha/state/";
         const size_t pfx_len = sizeof(prefix) - 1;
         if (strncmp(topic, prefix, pfx_len) != 0)

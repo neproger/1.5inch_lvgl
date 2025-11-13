@@ -72,6 +72,19 @@ function preview(buf) {
     return BROKER_LOG_HEX ? b.toString('hex') : b.toString('utf8');
 }
 
+// Простое хранилище состояний наших двух тестовых свитчей
+const entityStates = {
+    'switch.wifi_breaker_t_switch_1': 'OFF',
+    'switch.wifi_breaker_t_switch_2': 'OFF',
+};
+
+function toggleState(id) {
+    const cur = entityStates[id] || 'OFF';
+    const next = cur === 'ON' ? 'OFF' : 'ON';
+    entityStates[id] = next;
+    return next;
+}
+
 // Logging hooks
 aedes.on('clientReady', (client) => {
     console.log(`[broker] client connected id=${client ? client.id : '?'} addr=${client && client.conn ? client.conn.remoteAddress : '?'}:`);
@@ -92,9 +105,41 @@ aedes.on('unsubscribe', (subs, client) => {
 aedes.on('publish', (packet, client) => {
     // Skip $SYS noise
     if (!packet || !packet.topic || packet.topic.startsWith('$SYS')) return;
+
     const from = client ? `id=${client.id}` : 'broker';
-    const pl = packet.payload ? preview(Buffer.isBuffer(packet.payload) ? packet.payload : Buffer.from(String(packet.payload))) : '';
-    console.log(`[broker] publish ${from} -> topic=${packet.topic} qos=${packet.qos} retain=${packet.retain} bytes=${packet.payload ? packet.payload.length : 0} :: ${pl}`);
+    const plBuf = packet.payload
+        ? (Buffer.isBuffer(packet.payload) ? packet.payload : Buffer.from(String(packet.payload)))
+        : Buffer.alloc(0);
+    const pl = preview(plBuf);
+
+    console.log(`[broker] publish ${from} -> topic=${packet.topic} qos=${packet.qos} retain=${packet.retain} bytes=${plBuf.length} :: ${pl}`);
+
+    // --- ЛОГИКА ТЕСТОВЫХ СВИТЧЕЙ ---
+
+    // Реагируем только на команды от клиента, а не на собственные публикации брокера
+     if (client && packet.topic === 'ha/cmd/toggle') {
+        const entityId = plBuf.toString('utf8').trim();
+        console.log(`[logic] toggle requested for "${entityId}"`);
+
+        // если такой entity отслеживается – переключаем его самого
+        if (entityStates[entityId] !== undefined) {
+            const prev = entityStates[entityId];
+            const newState = toggleState(entityId);
+            const stateTopic = `ha/state/${entityId}`;
+            const statePayload = Buffer.from(newState, 'utf8');
+
+            console.log(
+                `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
+            );
+
+            aedes.publish({
+                topic: stateTopic,
+                payload: statePayload,
+                qos: 1,
+                retain: true,
+            });
+        }
+    }
 });
 
 const server = net.createServer(aedes.handle);
