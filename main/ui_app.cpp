@@ -19,6 +19,7 @@ static const char *TAG_UI = "UI";
 static lv_obj_t *s_status_label = NULL;
 static lv_obj_t *s_status_ring = NULL;
 static lv_obj_t *s_info_label = NULL; /* Secondary info/description label */
+static lv_obj_t *s_background = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
 static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
 static bool s_last_online = false;
@@ -45,34 +46,199 @@ static void store_listener(const core::AppState &st);
 void setInfo(const char *text);
 void setLabel(const char *text);
 
-extern "C" void ui_app_init(void)
+namespace // class UiScreen
 {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
 
-    /* Title label */
-    lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "KazDEV");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_set_style_text_font(title, &Montserrat_20, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
-
-    /* Initial selection shown */
-    s_last_input_us = esp_timer_get_time();
-    ui_show_current_item();
-
-    /* Create perimeter ring (red by default) */
-    if (s_status_ring == NULL)
+    enum class UiScreen
     {
-        int w = lv_obj_get_width(scr);
-        int h = lv_obj_get_height(scr);
+        Kitchen,
+        Hallway,
+        ScreenSaver
+    };
+
+    static UiScreen s_current_screen = UiScreen::ScreenSaver;
+
+    static lv_obj_t *s_kitchen_scr = nullptr;
+    static lv_obj_t *s_hallway_scr = nullptr;
+    static lv_obj_t *s_screen_saver_scr = nullptr;
+
+    // Виджеты для Kitchen
+    static lv_obj_t *s_kitchen_title = nullptr;
+    static lv_obj_t *s_kitchen_state_label = nullptr;
+
+    // Виджеты для Hallway
+    static lv_obj_t *s_hallway_title = nullptr;
+    static lv_obj_t *s_hallway_state_label = nullptr;
+
+    // Виджеты для ScreenSaver
+    static lv_obj_t *s_ss_title = nullptr;
+
+    // Если у тебя где-то был общий статус-обруч — можешь
+    static lv_obj_t *ring = nullptr;
+} // namespace
+
+namespace // ui_show_screen
+{
+
+    void ui_show_screen(UiScreen scr)
+    {
+        if (scr == s_current_screen)
+        {
+            return;
+        }
+        s_current_screen = scr;
+
+        switch (scr)
+        {
+        case UiScreen::Kitchen:
+            if (s_kitchen_scr)
+            {
+                lv_screen_load(s_kitchen_scr);
+            }
+            break;
+        case UiScreen::Hallway:
+            if (s_hallway_scr)
+            {
+                lv_screen_load(s_hallway_scr);
+            }
+            break;
+        case UiScreen::ScreenSaver:
+            if (s_screen_saver_scr)
+            {
+                lv_screen_load(s_screen_saver_scr);
+            }
+            break;
+        }
+    }
+
+} // namespace
+
+namespace // ui_build_kitchen_screen
+{
+    static void ui_build_kitchen_screen()
+    {
+        lv_obj_t *scr = lv_obj_create(NULL);
+        s_kitchen_scr = scr;
+
+        // Заголовок "Kitchen"
+        s_kitchen_title = lv_label_create(scr);
+        lv_label_set_text(s_kitchen_title, "Kitchen");
+        lv_obj_set_style_text_color(s_kitchen_title, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_set_style_text_font(s_kitchen_title, &Montserrat_20, 0);
+        lv_obj_align(s_kitchen_title, LV_ALIGN_TOP_MID, 0, 40);
+
+        // Статус девайса/группы (пока заглушка)
+        s_kitchen_state_label = lv_label_create(scr);
+        lv_label_set_text(s_kitchen_state_label, "Кухня");
+        lv_obj_set_style_text_color(s_kitchen_state_label, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_align(s_kitchen_state_label, LV_ALIGN_BOTTOM_MID, 0, -40);
+
+        // Если хочешь, можно сюда же перенести твой perimeter ring:
+        /*
+        int w = lv_obj_get_width(s_kitchen_scr);
+        int h = lv_obj_get_height(s_kitchen_scr);
         int margin = 1;
         int r = (w < h ? w : h) / 2 - margin;
         if (r < 4)
             r = (w < h ? w : h) / 2 - 1;
-        s_status_ring = create_perimeter_ring(scr, w / 2, h / 2, r, 0, 2, lv_color_hex(0xFF0000));
+        s_status_ring = create_perimeter_ring(s_kitchen_scr, w / 2, h / 2, r, 0, 2, lv_color_hex(0xFF0000));
+        */
     }
 
+} // namespace
+
+namespace // ui_build_hallway_screen
+{
+
+    static void ui_build_hallway_screen()
+    {
+        lv_obj_t *scr = lv_obj_create(NULL);
+        s_hallway_scr = scr;
+
+        s_hallway_title = lv_label_create(scr);
+        lv_label_set_text(s_hallway_title, "Hallway");
+        lv_obj_set_style_text_color(s_hallway_title, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_set_style_text_font(s_hallway_title, &Montserrat_20, 0);
+        lv_obj_align(s_hallway_title, LV_ALIGN_TOP_MID, 0, 40);
+
+        s_hallway_state_label = lv_label_create(scr);
+        lv_label_set_text(s_hallway_state_label, "Холл");
+        lv_obj_set_style_text_color(s_hallway_state_label, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_align(s_hallway_state_label, LV_ALIGN_BOTTOM_MID, 0, -40);
+    }
+
+} // namespace
+
+namespace // ui_build_screensaver_screen
+{
+
+    static void ui_build_screensaver_screen()
+    {
+        lv_obj_t *scr = lv_obj_create(NULL);
+        s_screen_saver_scr = scr;
+
+        s_ss_title = lv_label_create(scr);
+        lv_label_set_text(s_ss_title, "KazDEV");
+        lv_obj_set_style_text_color(s_ss_title, lv_color_hex(0x404040), 0);
+        lv_obj_set_style_text_font(s_ss_title, &Montserrat_20, 0);
+        lv_obj_align(s_ss_title, LV_ALIGN_CENTER, 0, 0);
+    }
+
+} // namespace
+
+namespace // update_state
+{
+
+    void ui_update_kitchen_state(const char *state_text)
+    {
+        if (s_kitchen_state_label)
+        {
+            lv_label_set_text_fmt(s_kitchen_state_label, "State: %s", state_text);
+        }
+    }
+
+    void ui_update_hallway_state(const char *state_text)
+    {
+        if (s_hallway_state_label)
+        {
+            lv_label_set_text_fmt(s_hallway_state_label, "State: %s", state_text);
+        }
+    }
+
+} // namespace
+
+void ui_app_init(void)
+{
+    // Время последнего ввода (как у тебя было)
+    s_last_input_us = esp_timer_get_time();
+
+    if (s_background == NULL)
+    {
+        lv_disp_t *disp = lv_disp_get_default();
+        lv_obj_t *layer = lv_layer_bottom();
+        if (disp && layer)
+        {
+            s_background = lv_obj_create(layer);
+            lv_coord_t w = lv_disp_get_hor_res(disp);
+            lv_coord_t h = lv_disp_get_ver_res(disp);
+            lv_obj_set_size(s_background, w, h);
+            lv_obj_clear_flag(s_background, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_bg_color(s_background, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
+            lv_obj_set_style_bg_opa(s_background, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+        }
+    }
+
+    // 1. Построить все скрины
+    ui_build_kitchen_screen();
+    ui_build_hallway_screen();
+    ui_build_screensaver_screen();
+
+    // 2. Показать стартовый (можно ScreenSaver или Kitchen)
+    ui_show_screen(UiScreen::ScreenSaver);
+    // или:
+    // ui_show_screen(UiScreen::Kitchen);
+
+    // 3. Таймер для UI — оставляем твой код
     if (s_ha_ui_timer == NULL)
     {
         esp_timer_create_args_t args = {};
@@ -82,8 +248,11 @@ extern "C" void ui_app_init(void)
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
+    // 4. Подписка на store
     core::store_subscribe(&store_listener);
     core::store_set_selected(s_cur_item);
+
+    // 5. Первичная отрисовка данных из store (потом разнесём по экранам)
     ui_refresh_current_state();
 }
 
