@@ -7,6 +7,7 @@ idf_component_register(
         "wifi_manager.c"
         "ha_mqtt.cpp"
         "app/router.cpp"
+        "app/entities.cpp"
         "core/store.cpp"
         "http_utils.cpp"
        

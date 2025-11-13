@@ -3,10 +3,9 @@
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "fonts.h"
-#include "ha_mqtt.hpp"
 #include "app/router.hpp"
-#include "ha_mqtt_config.h"
 #include "core/store.hpp"
+#include "app/entities.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
 #include <cstdint>
@@ -23,19 +22,9 @@ static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
 static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
-/* Multi-state UI: selectable HA entities + screensaver */
-typedef struct
-{
-    const char *name;      /* shown */
-    const char *entity_id; /* HA entity */
-} ui_item_t;
-
-static const ui_item_t s_ui_items[] = {
-    {"Кухня", "switch.wifi_breaker_t_switch_1"},
-    {"Коридор", "switch.wifi_breaker_t_switch_2"},
-};
-static const int s_ui_items_count = sizeof(s_ui_items) / sizeof(s_ui_items[0]);
+static const int s_ui_items_count = app::g_entity_count;
 static int s_cur_item = 0;
+static volatile bool s_state_dirty = true;
 
 static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
@@ -49,37 +38,12 @@ static void ha_toggle_task(void *arg);
 static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
+static void ui_refresh_current_state(void);
+static void store_listener(const core::AppState &st);
 void setInfo(const char *text);
 void setLabel(const char *text);
 
-static char s_item_state[s_ui_items_count][12] = {"-", "-"};
-static void ui_mqtt_on_msg(const char *topic, const char *data, int len)
-{
-    const char prefix[] = "ha/state/";
-    const size_t pfx_len = sizeof(prefix) - 1;
-    if (!topic)
-        return;
-    ESP_LOGI(TAG_UI, "MQTT msg received: topic='%s', len=%d, data='%.*s'", topic, len, len, data ? data : "");
-    if (strncmp(topic, prefix, pfx_len) != 0)
-        return;
-    const char *ent = topic + pfx_len;
-    for (int i = 0; i < s_ui_items_count; ++i)
-    {
-        if (strcmp(ent, s_ui_items[i].entity_id) == 0)
-        {
-            int n = (len < (int)sizeof(s_item_state[i]) - 1) ? len : (int)sizeof(s_item_state[i]) - 1;
-            if (n < 0)
-                n = 0;
-            memcpy(s_item_state[i], data ? data : "", n);
-            s_item_state[i][n] = '\0';
-            if (i == s_cur_item)
-            {
-                setInfo(s_item_state[i]);
-            }
-            break;
-        }
-    }
-}
+
 
 extern "C" void ui_app_init(void)
 {
@@ -118,25 +82,31 @@ extern "C" void ui_app_init(void)
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    // Subscribe to state topics for each configured entity
-    ha_mqtt::set_message_handler(&ui_mqtt_on_msg);
-    for (int i = 0; i < s_ui_items_count; ++i)
-    {
-        char topic[128];
-        snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
-        ha_mqtt::subscribe(topic, 1);
-    }
-
-    // Subscribe to store for connection updates (optional; timer also updates ring)
-    core::store_subscribe([](const core::AppState &st) {
-        s_last_online = st.connected;
-    });
+    core::store_subscribe(&store_listener);
+    core::store_set_selected(s_cur_item);
+    ui_refresh_current_state();
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
-    bool online = router::is_connected();
+    const core::AppState &st = core::store_get_state();
+    bool online = st.connected;
+    if (!s_screensaver && s_state_dirty)
+    {
+        s_state_dirty = false;
+        char info[32];
+        if (s_cur_item < st.entity_count)
+        {
+            strncpy(info, st.entities[s_cur_item].value, sizeof(info) - 1);
+            info[sizeof(info) - 1] = '\0';
+            setInfo(info);
+        }
+        else
+        {
+            setInfo("-");
+        }
+    }
     if (!s_screensaver && online != s_last_online && s_status_ring)
     {
         lvgl_port_lock(-1);
@@ -168,16 +138,18 @@ extern "C" void LVGL_knob_event(void *event)
     {
     case 0:
         s_cur_item = (s_cur_item + 1) % s_ui_items_count;
+        core::store_set_selected(s_cur_item);
         ui_show_current_item();
         break;
     case 1:
         s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count;
+        core::store_set_selected(s_cur_item);
         ui_show_current_item();
         break;
     default:
         break;
     }
-    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
+    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, app::g_entities[s_cur_item].name);
 }
 
 static const char *button_event_table[] = {
@@ -258,7 +230,7 @@ static void ha_toggle_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    const char *entity = s_ui_items[s_cur_item].entity_id;
+    const char *entity = app::g_entities[s_cur_item].entity_id;
     esp_err_t err = router::toggle(entity);
     if (err == ESP_OK)
     {
@@ -275,8 +247,8 @@ static void ha_toggle_task(void *arg)
 
 static void ui_show_current_item(void)
 {
-    setLabel(s_ui_items[s_cur_item].name);
-    setInfo(s_item_state[s_cur_item]);
+    setLabel(app::g_entities[s_cur_item].name);
+    ui_refresh_current_state();
 }
 
 static void ui_enter_screensaver(void)
@@ -329,6 +301,26 @@ static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
     return ring;
 }
 
+static void ui_refresh_current_state(void)
+{
+    const core::AppState &st = core::store_get_state();
+    if (s_cur_item < st.entity_count)
+    {
+        const char *val = st.entities[s_cur_item].value;
+        setInfo(val && val[0] ? val : "-");
+    }
+    else
+    {
+        setInfo("-");
+    }
+}
+
+static void store_listener(const core::AppState &st)
+{
+    (void)st;
+    s_state_dirty = true;
+}
+
 extern "C" void setLabel(const char *text)
 {
     if (!text)
@@ -373,3 +365,5 @@ void setInfo(const char *text)
     }
     lvgl_port_unlock();
 }
+
+

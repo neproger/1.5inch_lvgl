@@ -1,12 +1,25 @@
 #include "app/router.hpp"
 #include "ha_mqtt.hpp"
 #include "core/store.hpp"
+#include "app/entities.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <cstring>
+#include <cstdio>
 
 namespace {
 TaskHandle_t s_mon_task = nullptr;
 bool s_last_conn = false;
+
+void on_mqtt_msg(const char *topic, const char *data, int len)
+{
+    if (!topic) return;
+    const char prefix[] = "ha/state/";
+    const size_t pfx_len = sizeof(prefix) - 1;
+    if (strncmp(topic, prefix, pfx_len) != 0) return;
+    const char *entity = topic + pfx_len;
+    core::store_dispatch_entity_state(entity, data, len);
+}
 
 void monitor_task(void*)
 {
@@ -27,8 +40,21 @@ esp_err_t start()
 {
     // For now delegate to MQTT; later can wire Store/Services here.
     (void)core::store_start();
+    const char *ids[core::kMaxEntities];
+    int count = app::g_entity_count;
+    if (count > core::kMaxEntities) count = core::kMaxEntities;
+    for (int i = 0; i < count; ++i) ids[i] = app::g_entities[i].entity_id;
+    core::store_init_entities(ids, count);
     esp_err_t err = ha_mqtt::start();
     if (err != ESP_OK) return err;
+    ha_mqtt::set_message_handler(&on_mqtt_msg);
+    for (int i = 0; i < count; ++i) {
+        char topic[128];
+        snprintf(topic, sizeof(topic), "ha/state/%s", app::g_entities[i].entity_id);
+        ha_mqtt::subscribe(topic, 1);
+    }
+    s_last_conn = ha_mqtt::is_connected();
+    core::store_dispatch_connected(s_last_conn);
     if (!s_mon_task) {
         xTaskCreate(monitor_task, "router_mon", 2048, nullptr, 3, &s_mon_task);
     }
