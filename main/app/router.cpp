@@ -75,7 +75,7 @@ namespace router
         {
             char topic[128];
             snprintf(topic, sizeof(topic), "ha/state/%s", app::g_entities[i].entity_id);
-            ha_mqtt::subscribe(topic, 1);
+            ha_mqtt::subscribe(topic, 2);
         }
         s_last_conn = ha_mqtt::is_connected();
         core::store_dispatch_connected(s_last_conn);

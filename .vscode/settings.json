@@ -8,7 +8,12 @@
     "ui_events.h": "c",
     "lvgl.h": "c",
     "sdkconfig.h": "c",
-    "*.inc": "cpp"
+    "*.inc": "cpp",
+    "atomic": "cpp",
+    "chrono": "cpp",
+    "cstdint": "cpp",
+    "random": "cpp",
+    "stop_token": "cpp"
   },
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
