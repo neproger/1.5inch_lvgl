@@ -220,11 +220,6 @@ void ui_app_init(void)
     // Время последнего ввода (как у тебя было)
     s_last_input_us = esp_timer_get_time();
 
-    // Set the theme
-    // lv_disp_t *dispp = lv_disp_get_default();
-    // lv_theme_t *theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED), true, LV_FONT_DEFAULT);
-    // lv_disp_set_theme(dispp, theme);
-
     // 1. Построить все скрины
     ui_build_kitchen_screen();
     ui_build_hallway_screen();
@@ -232,8 +227,6 @@ void ui_app_init(void)
 
     // 2. Показать стартовый (можно ScreenSaver или Kitchen)
     lv_disp_load_scr(s_kitchen_scr);
-    // или:
-    // ui_show_screen(UiScreen::Kitchen);
 
     // 3. Таймер для UI — оставляем твой код
     if (s_ha_ui_timer == NULL)

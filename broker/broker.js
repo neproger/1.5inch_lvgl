@@ -12,15 +12,18 @@
     BROKER_LOG_MAX_BYTES=256     # preview length
 */
 
-const net = require('net');
-const fs = require('fs');
-const path = require('path');
-const aedes = require('aedes')();
+import { createServer } from 'net';
+import { existsSync, readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import aedes from 'aedes';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function loadEnvFile(envPath) {
     try {
-        if (!fs.existsSync(envPath)) return;
-        const content = fs.readFileSync(envPath, 'utf8');
+        if (!existsSync(envPath)) return;
+        const content = readFileSync(envPath, 'utf8');
         for (const rawLine of content.split(/\r?\n/)) {
             const line = rawLine.trim();
             if (!line || line.startsWith('#')) continue;
@@ -38,7 +41,7 @@ function loadEnvFile(envPath) {
     }
 }
 
-loadEnvFile(path.join(__dirname, '.env'));
+loadEnvFile(join(__dirname, '.env'));
 
 function getBool(name, def) {
     const v = process.env[name];
@@ -57,9 +60,11 @@ const BROKER_PASSWORD = getStr('BROKER_PASSWORD', '');
 const BROKER_LOG_HEX = getBool('BROKER_LOG_HEX', true);
 const BROKER_LOG_MAX_BYTES = Number(getStr('BROKER_LOG_MAX_BYTES', '256'));
 
+const broker = aedes();
+
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
-    aedes.authenticate = (client, username, password, done) => {
+    broker.authenticate = (client, username, password, done) => {
         console.log("Authenticate: ", username, password)
         const pwd = password ? password.toString('utf8') : '';
         const ok = username === BROKER_USERNAME && pwd === BROKER_PASSWORD;
@@ -87,23 +92,23 @@ function toggleState(id) {
 }
 
 // Logging hooks
-aedes.on('clientReady', (client) => {
+broker.on('clientReady', (client) => {
     console.log(`[broker] client connected id=${client ? client.id : '?'} addr=${client && client.conn ? client.conn.remoteAddress : '?'}:`);
 });
-aedes.on('clientDisconnect', (client) => {
+broker.on('clientDisconnect', (client) => {
     console.log(`[broker] client disconnected id=${client ? client.id : '?'}:`);
 });
-aedes.on('clientError', (client, err) => {
+broker.on('clientError', (client, err) => {
     console.warn(`[broker] client error id=${client ? client.id : '?'}: ${err && err.message}`);
 });
-aedes.on('subscribe', (subs, client) => {
+broker.on('subscribe', (subs, client) => {
     const topics = subs.map((s) => `${s.topic}(q${s.qos})`).join(', ');
     console.log(`[broker] subscribe id=${client ? client.id : '?'} -> ${topics}`);
 });
-aedes.on('unsubscribe', (subs, client) => {
+broker.on('unsubscribe', (subs, client) => {
     console.log(`[broker] unsubscribe id=${client ? client.id : '?'} -> ${subs.join(', ')}`);
 });
-aedes.on('publish', (packet, client) => {
+broker.on('publish', (packet, client) => {
     // Skip $SYS noise
     if (!packet || !packet.topic || packet.topic.startsWith('$SYS')) return;
 
@@ -118,7 +123,7 @@ aedes.on('publish', (packet, client) => {
     // --- ЛОГИКА ТЕСТОВЫХ СВИТЧЕЙ ---
 
     // Реагируем только на команды от клиента, а не на собственные публикации брокера
-     if (client && packet.topic === 'ha/cmd/toggle') {
+    if (client && packet.topic === 'ha/cmd/toggle') {
         const entityId = plBuf.toString('utf8').trim();
         // console.log(`[logic] toggle requested for "${entityId}"`);
 
@@ -133,7 +138,7 @@ aedes.on('publish', (packet, client) => {
             //     `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
             // );
 
-            aedes.publish({
+            broker.publish({
                 topic: stateTopic,
                 payload: statePayload,
                 qos: 1,
@@ -143,7 +148,7 @@ aedes.on('publish', (packet, client) => {
     }
 });
 
-const server = net.createServer(aedes.handle);
+const server = createServer(broker.handle);
 server.listen(BROKER_PORT, BROKER_HOST, () => {
     console.log('[broker] listening', { BROKER_HOST, BROKER_PORT, auth: !!(BROKER_USERNAME || BROKER_PASSWORD) });
 });
@@ -151,8 +156,7 @@ server.listen(BROKER_PORT, BROKER_HOST, () => {
 function shutdown() {
     console.log('\n[broker] shutting down...');
     try { server.close(); } catch (_) { }
-    try { aedes.close(() => process.exit(0)); } catch (_) { process.exit(0); }
+    try { broker.close(() => process.exit(0)); } catch (_) { process.exit(0); }
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-

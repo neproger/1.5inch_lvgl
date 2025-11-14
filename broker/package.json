@@ -5,6 +5,7 @@
   "description": "Simple TCP→TLS proxy for MQTT so constrained devices can talk to a TLS-only broker via local plain TCP.",
   "main": "index.js",
   "license": "UNLICENSED",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "broker": "node broker.js"

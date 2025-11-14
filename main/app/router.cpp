@@ -2,6 +2,7 @@
 #include "ha_mqtt.hpp"
 #include "core/store.hpp"
 #include "app/entities.hpp"
+#include "ha_ws.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstring>
@@ -12,6 +13,7 @@ namespace
 {
     static const char *TAG = "router";
     TaskHandle_t s_mon_task = nullptr;
+    TaskHandle_t s_ws_req_task = nullptr;
     bool s_last_conn = false;
 
     void on_mqtt_msg(const char *topic, const char *data, int len)
@@ -48,6 +50,26 @@ namespace
             vTaskDelay(pdMS_TO_TICKS(500));
         }
     }
+
+    void on_ws_message(const char *json, size_t len)
+    {
+        ESP_LOGI(TAG, "WS RX %.*s", (int)len, json);
+    }
+
+    void ws_request_task(void *)
+    {
+        for (;;)
+        {
+            if (ha_ws::is_ready())
+            {
+                ha_ws::request_area_registry_list();
+                ha_ws::request_device_registry_list();
+                ha_ws::request_entity_registry_list();
+                vTaskDelete(nullptr);
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
 }
 
 namespace router
@@ -77,6 +99,19 @@ namespace router
             snprintf(topic, sizeof(topic), "ha/state/%s", app::g_entities[i].entity_id);
             ha_mqtt::subscribe(topic, 2);
         }
+
+        ha_ws::set_message_handler(&on_ws_message);
+        esp_err_t ws_err = ha_ws::start();
+        if (ws_err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "WS start failed: %s", esp_err_to_name(ws_err));
+        }
+        else if (!s_ws_req_task)
+        {
+            ESP_LOGI(TAG, "WS CONNECTED");
+            xTaskCreate(ws_request_task, "ha_ws_req", 4096, nullptr, 3, &s_ws_req_task);
+        }
+
         s_last_conn = ha_mqtt::is_connected();
         core::store_dispatch_connected(s_last_conn);
         if (!s_mon_task)

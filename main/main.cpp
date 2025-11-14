@@ -21,8 +21,12 @@ extern "C" void app_main(void)
     // Wi‑Fi: инициализация и запуск авто‑поиска/подключения
     if (wifi_manager_init() == ESP_OK)
     {
-        wifi_manager_start_auto(-85, 15000); // каждые 15с пробуем, если не подключены
-        (void)router::start();               // Start connectivity via Router (currently MQTT)
+        wifi_manager_start_auto(-85, 15000);
+        while (!wifi_manager_is_connected())
+        {
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        (void)router::start();
     }
     else
     {

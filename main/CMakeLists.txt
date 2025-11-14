@@ -6,6 +6,7 @@ idf_component_register(
         
         "wifi_manager.c"
         "ha_mqtt.cpp"
+        "ha_ws.cpp"
         "app/router.cpp"
         "app/entities.cpp"
         "core/store.cpp"
@@ -33,4 +34,5 @@ idf_component_register(
         esp_lvgl_port
         json
         mqtt
+        esp_websocket_client
 )
