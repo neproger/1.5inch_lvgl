@@ -8,6 +8,7 @@
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include <stdbool.h>
+#include <cstring>
 #include "wifi_manager.h"
 #include "http_utils.h"
 #include "ha_http_config.h"

@@ -1,4 +1,4 @@
-#include "ui_app.h"
+﻿#include "ui_app.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
@@ -6,6 +6,7 @@
 #include "app/router.hpp"
 #include "core/store.hpp"
 #include "app/entities.hpp"
+#include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
 #include <cstdint>
@@ -42,9 +43,12 @@ static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
 static void ui_refresh_current_state(void);
-static void store_listener(const core::AppState &st);
 void setInfo(const char *text);
 void setLabel(const char *text);
+static const char *get_entity_name_for_index(int index);
+static const char *get_entity_id_for_index(int index);
+static const char *get_entity_state_for_index(int index);
+static int get_ui_items_count();
 
 namespace // class UiScreen
 {
@@ -117,13 +121,13 @@ namespace // ui_build_kitchen_screen
 {
     static void ui_build_kitchen_screen()
     {
-        const core::AppState &st = core::store_get_state();
-        for (int i = 0; i < st.entity_count; ++i)
+        const auto &ents = state::entities();
+        for (size_t i = 0; i < ents.size(); ++i)
         {
-            ESP_LOGI(TAG_UI, "entity[%d]: id=%s value=%s",
-                     i,
-                     st.entities[i].entity_id,
-                     st.entities[i].value);
+            ESP_LOGI(TAG_UI, "entity[%d]: id=%s state=%s",
+                     static_cast<int>(i),
+                     ents[i].id.c_str(),
+                     ents[i].state.c_str());
         }
         s_kitchen_scr = lv_obj_create(NULL);
         lv_obj_set_style_bg_color(s_kitchen_scr, lv_color_hex(0x000000), 0);
@@ -245,33 +249,17 @@ void ui_app_init(void)
         esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
     }
 
-    // 4. Подписка на store
-    core::store_subscribe(&store_listener);
-    core::store_set_selected(s_cur_item);
-
-    // 5. Первичная отрисовка данных из store (потом разнесём по экранам)
-    ui_refresh_current_state();
+    // 4. �������� ����������� �������� ���\r\n    ui_refresh_current_state();
 }
 
 static void ha_ui_timer_cb(void *arg)
 {
     (void)arg;
-    const core::AppState &st = core::store_get_state();
-    bool online = st.connected;
+    bool online = router::is_connected();
     if (!s_screensaver && s_state_dirty)
     {
         s_state_dirty = false;
-        char info[32];
-        if (s_cur_item < st.entity_count)
-        {
-            strncpy(info, st.entities[s_cur_item].value, sizeof(info) - 1);
-            info[sizeof(info) - 1] = '\0';
-            setInfo(info);
-        }
-        else
-        {
-            setInfo("-");
-        }
+        ui_refresh_current_state();
     }
     if (!s_screensaver && online != s_last_online && s_status_ring)
     {
@@ -303,19 +291,17 @@ extern "C" void LVGL_knob_event(void *event)
     switch (ev)
     {
     case 0:
-        s_cur_item = (s_cur_item + 1) % s_ui_items_count;
-        core::store_set_selected(s_cur_item);
+        s_cur_item = (s_cur_item + 1) % get_ui_items_count();
         ui_show_current_item();
         break;
     case 1:
-        s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count;
-        core::store_set_selected(s_cur_item);
+        s_cur_item = (s_cur_item - 1 + get_ui_items_count()) % get_ui_items_count();
         ui_show_current_item();
         break;
     default:
         break;
     }
-    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, app::g_entities[s_cur_item].name);
+    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, get_entity_name_for_index(s_cur_item));
 }
 
 static const char *button_event_table[] = {
@@ -396,7 +382,7 @@ static void ha_toggle_task(void *arg)
         vTaskDelete(NULL);
         return;
     }
-    const char *entity = app::g_entities[s_cur_item].entity_id;
+    const char *entity = get_entity_id_for_index(s_cur_item);
     esp_err_t err = router::toggle(entity);
     if (err == ESP_OK)
     {
@@ -413,7 +399,7 @@ static void ha_toggle_task(void *arg)
 
 static void ui_show_current_item(void)
 {
-    setLabel(app::g_entities[s_cur_item].name);
+    setLabel(get_entity_name_for_index(s_cur_item));
     ui_refresh_current_state();
 }
 
@@ -469,22 +455,62 @@ static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int rad
 
 static void ui_refresh_current_state(void)
 {
-    const core::AppState &st = core::store_get_state();
-    if (s_cur_item < st.entity_count)
-    {
-        const char *val = st.entities[s_cur_item].value;
-        setInfo(val && val[0] ? val : "-");
-    }
-    else
-    {
-        setInfo("-");
-    }
+    const char *val = get_entity_state_for_index(s_cur_item);
+    setInfo(val && val[0] ? val : "-");
 }
 
-static void store_listener(const core::AppState &st)
+static const char *get_entity_name_for_index(int index)
 {
-    (void)st;
-    s_state_dirty = true;
+    if (index < 0)
+        return "";
+    const auto &ents = state::entities();
+    if (!ents.empty())
+    {
+        if (index < static_cast<int>(ents.size()))
+            return ents[static_cast<size_t>(index)].name.c_str();
+        return "";
+    }
+    if (index < app::g_entity_count)
+        return app::g_entities[index].name;
+    return "";
+}
+
+static const char *get_entity_id_for_index(int index)
+{
+    if (index < 0)
+        return "";
+    const auto &ents = state::entities();
+    if (!ents.empty())
+    {
+        if (index < static_cast<int>(ents.size()))
+            return ents[static_cast<size_t>(index)].id.c_str();
+        return "";
+    }
+    if (index < app::g_entity_count)
+        return app::g_entities[index].entity_id;
+    return "";
+}
+
+static const char *get_entity_state_for_index(int index)
+{
+    if (index < 0)
+        return "";
+    const auto &ents = state::entities();
+    if (!ents.empty())
+    {
+        if (index < static_cast<int>(ents.size()))
+            return ents[static_cast<size_t>(index)].state.c_str();
+        return "";
+    }
+    return "";
+}
+
+static int get_ui_items_count()
+{
+    const auto &ents = state::entities();
+    if (!ents.empty())
+        return static_cast<int>(ents.size());
+    return app::g_entity_count;
 }
 
 extern "C" void setLabel(const char *text)
@@ -531,3 +557,4 @@ void setInfo(const char *text)
     }
     lvgl_port_unlock();
 }
+

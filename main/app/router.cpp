@@ -33,7 +33,14 @@ namespace
         if (strncmp(topic, prefix, pfx_len) != 0)
             return;
         const char *entity = topic + pfx_len;
+        // Обновляем legacy-store для текущего UI
         core::store_dispatch_entity_state(entity, data, len);
+        // И параллельно поддерживаем state_manager как источник правды
+        if (data && len >= 0)
+        {
+            std::string value(data, data + len);
+            state::set_entity_state(entity, value);
+        }
     }
 
     void monitor_task(void *)
@@ -89,6 +96,19 @@ namespace router
         }
 
         core::store_init_entities(ids, count);
+        // Прокидываем начальные значения из state_manager в store,
+        // чтобы текущий UI сразу увидел состояния из CSV.
+        if (use_state_entities)
+        {
+            int max = count;
+            for (int i = 0; i < max; ++i)
+            {
+                const auto &e = ents[static_cast<size_t>(i)];
+                core::store_dispatch_entity_state(e.id.c_str(),
+                                                  e.state.c_str(),
+                                                  static_cast<int>(e.state.size()));
+            }
+        }
         esp_err_t err = ha_mqtt::start();
         if (err != ESP_OK)
         {
