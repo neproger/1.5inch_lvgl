@@ -242,6 +242,16 @@ void ui_app_init(void)
     // ui_show_screen(UiScreen::Kitchen);
 
     // 3. Таймер для UI — оставляем твой код
+    {
+        const auto &ents = state::entities();
+        for (const auto &e : ents)
+        {
+            int id = state::subscribe_entity(e.id, &on_state_entity_changed);
+            if (id > 0)
+                s_state_subscriptions.push_back(id);
+        }
+    }
+
     if (s_ha_ui_timer == NULL)
     {
         esp_timer_create_args_t args = {};
@@ -564,4 +574,6 @@ void setInfo(const char *text)
     }
     lvgl_port_unlock();
 }
+
+
 

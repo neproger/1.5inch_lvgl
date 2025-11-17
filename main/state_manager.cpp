@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <mutex>
 
 namespace state {
 
@@ -26,6 +27,7 @@ struct ListenerEntry {
 
 std::vector<ListenerEntry> g_listeners;
 int g_next_listener_id = 1;
+std::mutex g_mutex;
 
 static void trim(std::string &s)
 {
@@ -98,6 +100,8 @@ static bool split_csv_line(const std::string &line, std::array<std::string, 5> &
 
 bool init_from_csv(const char *csv, size_t len)
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
     g_areas.clear();
     g_entities.clear();
     g_area_index_by_id.clear();
@@ -228,41 +232,58 @@ bool init_from_csv(const char *csv, size_t len)
 
 bool set_entity_state(const std::string &entity_id, const std::string &state)
 {
-    auto it = g_entity_index_by_id.find(entity_id);
-    if (it == g_entity_index_by_id.end())
-        return false;
+    std::vector<EntityListener> listeners_to_call;
+    size_t index = 0;
 
-    Entity &e = g_entities[it->second];
-    if (e.state == state)
-        return true;
-
-    e.state = state;
-
-    // Notify listeners
-    for (const auto &entry : g_listeners)
     {
-        if (!entry.cb)
-            continue;
-        if (entry.entity_id == entity_id)
+        std::lock_guard<std::mutex> lock(g_mutex);
+
+        auto it = g_entity_index_by_id.find(entity_id);
+        if (it == g_entity_index_by_id.end())
+            return false;
+
+        index = it->second;
+        Entity &e = g_entities[index];
+        if (e.state == state)
+            return true;
+
+        e.state = state;
+
+        // Collect listeners to call outside the lock
+        for (const auto &entry : g_listeners)
         {
-            entry.cb(e);
+            if (entry.cb && entry.entity_id == entity_id)
+            {
+                listeners_to_call.push_back(entry.cb);
+            }
         }
     }
+
+    const Entity &e = g_entities[index];
+    for (const auto &cb : listeners_to_call)
+    {
+        cb(e);
+    }
+
     return true;
 }
 
 const std::vector<Area> &areas()
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
     return g_areas;
 }
 
 const std::vector<Entity> &entities()
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
     return g_entities;
 }
 
 const Entity *find_entity(const std::string &id)
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
+
     auto it = g_entity_index_by_id.find(id);
     if (it == g_entity_index_by_id.end())
         return nullptr;
@@ -273,6 +294,7 @@ int subscribe_entity(const std::string &id, EntityListener cb)
 {
     if (!cb)
         return 0;
+    std::lock_guard<std::mutex> lock(g_mutex);
     ListenerEntry e;
     e.id = g_next_listener_id++;
     e.entity_id = id;
@@ -285,6 +307,7 @@ void unsubscribe(int subscription_id)
 {
     if (subscription_id <= 0)
         return;
+    std::lock_guard<std::mutex> lock(g_mutex);
     for (auto it = g_listeners.begin(); it != g_listeners.end(); ++it)
     {
         if (it->id == subscription_id)
