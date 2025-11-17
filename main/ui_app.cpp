@@ -4,7 +4,6 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "app/router.hpp"
-#include "core/store.hpp"
 #include "app/entities.hpp"
 #include "state_manager.hpp"
 #include "devices_init.h"
@@ -12,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <vector>
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +29,7 @@ static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 static const int s_ui_items_count = app::g_entity_count;
 static int s_cur_item = 0;
 static volatile bool s_state_dirty = true;
+static std::vector<int> s_state_subscriptions;
 
 static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
@@ -43,6 +44,7 @@ static void ui_show_current_item(void);
 static void ui_enter_screensaver(void);
 static void ui_exit_screensaver(void);
 static void ui_refresh_current_state(void);
+static void on_state_entity_changed(const state::Entity &e);
 void setInfo(const char *text);
 void setLabel(const char *text);
 static const char *get_entity_name_for_index(int index);
@@ -457,6 +459,11 @@ static void ui_refresh_current_state(void)
 {
     const char *val = get_entity_state_for_index(s_cur_item);
     setInfo(val && val[0] ? val : "-");
+}
+
+static void on_state_entity_changed(const state::Entity & /*e*/)
+{
+    s_state_dirty = true;
 }
 
 static const char *get_entity_name_for_index(int index)

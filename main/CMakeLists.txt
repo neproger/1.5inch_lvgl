@@ -7,7 +7,6 @@ idf_component_register(
         "ha_mqtt.cpp"
         "app/router.cpp"
         "app/entities.cpp"
-        "core/store.cpp"
         "state_manager.cpp"
         "http_utils.cpp"
         "../fonts/Montserrat_20.c"
