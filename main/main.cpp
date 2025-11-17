@@ -11,6 +11,7 @@
 #include "wifi_manager.h"
 #include "http_utils.h"
 #include "ha_http_config.h"
+#include "state_manager.hpp"
 #include "app/router.hpp"
 
 static const char *TAG_APP = "app";
@@ -48,7 +49,7 @@ static bool ensure_wifi_connected(void)
 
 static bool perform_bootstrap_request(void)
 {
-    char buf[256];
+    char buf[2048];
     int status = 0;
     const char *token = (kBootstrapToken && kBootstrapToken[0]) ? kBootstrapToken : nullptr;
     esp_err_t err = http_send("POST", kBootstrapUrl, kBootstrapTemplateBody, "application/json", token, buf, sizeof(buf), &status);
@@ -61,6 +62,16 @@ static bool perform_bootstrap_request(void)
     {
         ESP_LOGW(TAG_APP, "Bootstrap HTTP status %d", status);
         return false;
+    }
+    if (!state::init_from_csv(buf, std::strlen(buf)))
+    {
+        ESP_LOGW(TAG_APP, "Failed to parse bootstrap CSV; proceeding with empty state");
+    }
+    else
+    {
+        ESP_LOGI(TAG_APP, "State initialized: %d areas, %d entities",
+                 (int)state::areas().size(),
+                 (int)state::entities().size());
     }
     ESP_LOGI(TAG_APP, "Bootstrap HTTP ok (status %d)", status);
     return true;

@@ -2,6 +2,7 @@
 #include "ha_mqtt.hpp"
 #include "core/store.hpp"
 #include "app/entities.hpp"
+#include "state_manager.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstring>
@@ -59,11 +60,34 @@ namespace router
         // For now delegate to MQTT; later can wire Store/Services here.
         (void)core::store_start();
         const char *ids[core::kMaxEntities];
-        int count = app::g_entity_count;
-        if (count > core::kMaxEntities)
-            count = core::kMaxEntities;
-        for (int i = 0; i < count; ++i)
-            ids[i] = app::g_entities[i].entity_id;
+        int count = 0;
+
+        const auto &ents = state::entities();
+        bool use_state_entities = !ents.empty();
+
+        if (use_state_entities)
+        {
+            int max = static_cast<int>(ents.size());
+            if (max > core::kMaxEntities)
+                max = core::kMaxEntities;
+            for (int i = 0; i < max; ++i)
+            {
+                ids[i] = ents[static_cast<size_t>(i)].id.c_str();
+            }
+            count = max;
+        }
+        else
+        {
+            int max = app::g_entity_count;
+            if (max > core::kMaxEntities)
+                max = core::kMaxEntities;
+            for (int i = 0; i < max; ++i)
+            {
+                ids[i] = app::g_entities[i].entity_id;
+            }
+            count = max;
+        }
+
         core::store_init_entities(ids, count);
         esp_err_t err = ha_mqtt::start();
         if (err != ESP_OK)
@@ -74,7 +98,16 @@ namespace router
         for (int i = 0; i < count; ++i)
         {
             char topic[128];
-            snprintf(topic, sizeof(topic), "ha/state/%s", app::g_entities[i].entity_id);
+            const char *entity_id = nullptr;
+            if (use_state_entities)
+            {
+                entity_id = ents[static_cast<size_t>(i)].id.c_str();
+            }
+            else
+            {
+                entity_id = app::g_entities[i].entity_id;
+            }
+            snprintf(topic, sizeof(topic), "ha/state/%s", entity_id);
             ha_mqtt::subscribe(topic, 2);
         }
         s_last_conn = ha_mqtt::is_connected();

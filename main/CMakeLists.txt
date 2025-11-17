@@ -8,6 +8,7 @@ idf_component_register(
         "app/router.cpp"
         "app/entities.cpp"
         "core/store.cpp"
+        "state_manager.cpp"
         "http_utils.cpp"
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
