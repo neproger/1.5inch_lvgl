@@ -6,19 +6,11 @@
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "esp_log.h"
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-#include "esp_crt_bundle.h"
-#endif
 
 #include "wifi_manager.h"
 #include "http_utils.h"
 
 static const char *TAG_HTTP = "http_utils";
-
-static bool is_https_url(const char *url)
-{
-    return (url && strncasecmp(url, "https://", 8) == 0);
-}
 
 esp_err_t http_send(const char *method,
                     const char *url,
@@ -40,22 +32,11 @@ esp_err_t http_send(const char *method,
 
     esp_http_client_config_t cfg = {};
     cfg.url = url;
-    cfg.timeout_ms = 7000;
+    cfg.timeout_ms = 15000;
     cfg.disable_auto_redirect = false;
     cfg.buffer_size = 2048;
     cfg.buffer_size_tx = 1024;
     cfg.keep_alive_enable = true;
-
-    if (is_https_url(url))
-    {
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-#else
-        // No CA provided and bundle disabled: allow only if server cert matches build config.
-        // For production, enable bundle or set cfg.cert_pem.
-#endif
-        cfg.skip_cert_common_name_check = true;
-    }
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client)

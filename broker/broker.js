@@ -15,6 +15,7 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const aedes = require('aedes')();
 
 function loadEnvFile(envPath) {
@@ -50,12 +51,13 @@ function getStr(name, def) {
     return v == null || v === '' ? def : v;
 }
 
-const BROKER_HOST = getStr('BROKER_HOST', '127.0.0.1');
+const BROKER_HOST = getStr('BROKER_HOST', '0.0.0.0');
 const BROKER_PORT = Number(getStr('BROKER_PORT', '1884'));
 const BROKER_USERNAME = getStr('BROKER_USERNAME', '');
 const BROKER_PASSWORD = getStr('BROKER_PASSWORD', '');
 const BROKER_LOG_HEX = getBool('BROKER_LOG_HEX', true);
 const BROKER_LOG_MAX_BYTES = Number(getStr('BROKER_LOG_MAX_BYTES', '256'));
+const HTTP_PORT = Number(getStr('HTTP_PORT', '8080'));
 
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
@@ -148,9 +150,42 @@ server.listen(BROKER_PORT, BROKER_HOST, () => {
     console.log('[broker] listening', { BROKER_HOST, BROKER_PORT, auth: !!(BROKER_USERNAME || BROKER_PASSWORD) });
 });
 
+// Simple HTTP endpoint emulating HA /api/template
+const httpServer = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/api/template') {
+        let body = '';
+        req.on('data', (chunk) => {
+            body += chunk;
+            if (body.length > 10240) {
+                // prevent abuse
+                req.socket.destroy();
+            }
+        });
+        req.on('end', () => {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.end(
+                'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
+                '\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Relay_01,off\n'
+            );
+        });
+        return;
+    }
+
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end('Not found');
+});
+
+httpServer.listen(HTTP_PORT, BROKER_HOST, () => {
+    console.log('[http] listening', { host: BROKER_HOST, port: HTTP_PORT, path: '/api/template' });
+});
+
 function shutdown() {
     console.log('\n[broker] shutting down...');
     try { server.close(); } catch (_) { }
+    try { httpServer.close(); } catch (_) { }
     try { aedes.close(() => process.exit(0)); } catch (_) { process.exit(0); }
 }
 process.on('SIGINT', shutdown);

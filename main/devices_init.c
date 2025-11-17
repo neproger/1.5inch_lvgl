@@ -68,7 +68,8 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 #define EXAMPLE_LCD_BITS_PER_PIXEL (16)
 #define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)
 #define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (160)
+// Reduce LVGL draw buffer height to save RAM on ESP32
+#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
 #define EXAMPLE_LCD_SPI_SPEED_MHZ (40)    /* Was 40 MHz; 26 MHz is safer */
 #define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1) /* Limit in-flight DMA transactions */
