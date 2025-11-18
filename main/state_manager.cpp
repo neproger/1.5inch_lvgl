@@ -20,6 +20,7 @@ namespace state
         std::vector<Entity> g_entities;
         std::unordered_map<std::string, size_t> g_area_index_by_id;
         std::unordered_map<std::string, size_t> g_entity_index_by_id;
+        WeatherState g_weather;
 
         struct ListenerEntry
         {
@@ -292,6 +293,20 @@ namespace state
         if (it == g_entity_index_by_id.end())
             return nullptr;
         return &g_entities[it->second];
+    }
+
+    void set_weather(float temperature_c, const std::string &condition)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_weather.temperature_c = temperature_c;
+        g_weather.condition = condition;
+        g_weather.valid = true;
+    }
+
+    WeatherState weather()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_weather;
     }
 
     int subscribe_entity(const std::string &id, EntityListener cb)

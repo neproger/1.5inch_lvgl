@@ -21,6 +21,13 @@ namespace state
         std::string area_id;
     };
 
+    struct WeatherState
+    {
+        float temperature_c = 0.0f;
+        std::string condition;
+        bool valid = false;
+    };
+
     using EntityListener = std::function<void(const Entity &)>;
 
     // Parse initial state from CSV (bootstrap HTTP response).
@@ -34,6 +41,10 @@ namespace state
     const std::vector<Area> &areas();
     const std::vector<Entity> &entities();
     const Entity *find_entity(const std::string &id);
+
+    // Weather state
+    void set_weather(float temperature_c, const std::string &condition);
+    WeatherState weather();
 
     // UI subscriptions
     int subscribe_entity(const std::string &id, EntityListener cb);

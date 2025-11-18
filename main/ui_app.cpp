@@ -8,12 +8,15 @@
 #include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
+#include "http_utils.h"
+#include "ha_http_config.h"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <cstdio>
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,12 +25,31 @@ static const char *TAG_UI = "UI";
 static TaskHandle_t s_ha_req_task = NULL;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
-static volatile bool s_state_dirty = true;
 static std::vector<int> s_state_subscriptions;
-
 static int64_t s_last_input_us = 0;
 static lv_obj_t *s_spinner = NULL;
 static std::string s_pending_toggle_entity;
+static TaskHandle_t s_weather_task = NULL;
+
+enum class UiMode
+{
+    Rooms,
+    Screensaver
+};
+
+static UiMode s_ui_mode = UiMode::Rooms;
+static lv_obj_t *s_screensaver_root = NULL;
+static lv_obj_t *s_weather_label = NULL;
+static lv_timer_t *s_idle_timer = NULL;
+static const uint32_t kScreensaverTimeoutMs = 5000;
+
+static constexpr const char *kWeatherUrl = HA_HTTP_BOOTSTRAP_URL;
+static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
+static const char *kWeatherTemplateBody = R"json(
+{
+  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}°C, {{ w.state if w else 'N/A' }}"
+}
+)json";
 
 namespace // room pages
 {
@@ -47,6 +69,7 @@ namespace // room pages
         lv_obj_t *root = nullptr;
         lv_obj_t *title_label = nullptr;
         lv_obj_t *list_container = nullptr;
+        lv_obj_t *weather_label = nullptr;
         std::vector<DeviceWidget> devices;
     };
 
@@ -55,17 +78,19 @@ namespace // room pages
     static int s_current_device_index = 0;
 
     static void ui_build_room_pages();
+    static void ui_update_weather_label();
 }
 
 static void handle_single_click(void);
 static void ha_toggle_task(void *arg);
 static void trigger_toggle_for_entity(const std::string &entity_id);
 static void switch_event_cb(lv_event_t *e);
-static void ui_show_current_item(void);
-static void ui_refresh_current_state(void);
 static void on_state_entity_changed(const state::Entity &e);
 static void ui_show_spinner(void);
 static void ui_hide_spinner(void);
+static void weather_task(void *arg);
+static void ui_build_screensaver(void);
+static void idle_timer_cb(lv_timer_t *timer);
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
@@ -78,7 +103,6 @@ void ui_app_init(void)
         s_current_room_index = 0;
         s_current_device_index = 0;
         lv_disp_load_scr(s_room_pages[0].root);
-        ui_show_current_item();  // чтобы сразу подтянуть state для первого девайса
     }
 
     // 3. Таймер для UI — оставляем твой код
@@ -97,6 +121,25 @@ void ui_app_init(void)
     }
 }
 
+extern "C" void ui_init_screensaver_support(void)
+{
+    ui_build_screensaver();
+    ui_update_weather_label();
+
+    if (s_idle_timer == NULL)
+    {
+        s_idle_timer = lv_timer_create(idle_timer_cb, 500, NULL);
+    }
+}
+
+extern "C" void ui_start_weather_polling(void)
+{
+    if (s_weather_task == NULL)
+    {
+        xTaskCreate(weather_task, "weather", 4096, NULL, 3, &s_weather_task);
+    }
+}
+
 static const char *knob_event_table[] = {
     "KNOB_RIGHT",
     "KNOB_LEFT",
@@ -110,6 +153,23 @@ extern "C" void LVGL_knob_event(void *event)
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
 
+    lv_display_trigger_activity(NULL);
+
+    if (s_ui_mode == UiMode::Screensaver)
+    {
+        s_ui_mode = UiMode::Rooms;
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            if (s_current_room_index < 0 || s_current_room_index >= rooms)
+            {
+                s_current_room_index = 0;
+            }
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
+        return;
+    }
+
     switch (ev)
     {
     case 0:
@@ -119,7 +179,6 @@ extern "C" void LVGL_knob_event(void *event)
             s_current_room_index = (s_current_room_index + 1) % rooms;
             s_current_device_index = 0;
             lv_disp_load_scr(s_room_pages[s_current_room_index].root);
-            ui_show_current_item();
         }
         break;
     case 1:
@@ -129,7 +188,6 @@ extern "C" void LVGL_knob_event(void *event)
             s_current_room_index = (s_current_room_index - 1 + rooms) % rooms;
             s_current_device_index = 0;
             lv_disp_load_scr(s_room_pages[s_current_room_index].root);
-            ui_show_current_item();
         }
         break;
     default:
@@ -166,6 +224,23 @@ extern "C" void LVGL_button_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
+
+    lv_display_trigger_activity(NULL);
+
+    if (s_ui_mode == UiMode::Screensaver)
+    {
+        s_ui_mode = UiMode::Rooms;
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            if (s_current_room_index < 0 || s_current_room_index >= rooms)
+            {
+                s_current_room_index = 0;
+            }
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
+        return;
+    }
 
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
@@ -265,6 +340,9 @@ static void ha_toggle_task(void *arg)
 {
     char *entity = static_cast<char *>(arg);
 
+    s_last_toggle_us = esp_timer_get_time();
+    vTaskDelay(pdMS_TO_TICKS(200));
+
     if (!wifi_manager_is_connected())
     {
         ESP_LOGW(TAG_UI, "No WiFi, cannot toggle entity");
@@ -280,12 +358,7 @@ static void ha_toggle_task(void *arg)
     if (entity)
         std::free(entity);
 
-    if (err == ESP_OK)
-    {
-        s_last_toggle_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
-    else
+    if (err != ESP_OK)
     {
         ESP_LOGW(TAG_UI, "MQTT toggle error: %d", (int)err);
     }
@@ -330,52 +403,6 @@ static void switch_event_cb(lv_event_t *e)
     trigger_toggle_for_entity(entity_id);
 }
 
-static void ui_show_current_item(void)
-{
-    if (!s_room_pages.empty() &&
-        s_current_room_index >= 0 &&
-        s_current_room_index < static_cast<int>(s_room_pages.size()))
-    {
-        const RoomPage &page = s_room_pages[s_current_room_index];
-        if (!page.devices.empty() &&
-            s_current_device_index >= 0 &&
-            s_current_device_index < static_cast<int>(page.devices.size()))
-        {
-            const DeviceWidget &w = page.devices[static_cast<size_t>(s_current_device_index)];
-            (void)w;
-            ui_refresh_current_state();
-            return;
-        }
-    }
-
-    ui_refresh_current_state();
-}
-
-static void ui_refresh_current_state(void)
-{
-    const char *val = nullptr;
-
-    if (!s_room_pages.empty() &&
-        s_current_room_index >= 0 &&
-        s_current_room_index < static_cast<int>(s_room_pages.size()))
-    {
-        const RoomPage &page = s_room_pages[s_current_room_index];
-        if (!page.devices.empty() &&
-            s_current_device_index >= 0 &&
-            s_current_device_index < static_cast<int>(page.devices.size()))
-        {
-            const DeviceWidget &w = page.devices[static_cast<size_t>(s_current_device_index)];
-            const state::Entity *e = state::find_entity(w.entity_id);
-            if (e)
-            {
-                val = e->state.c_str();
-            }
-        }
-    }
-
-    (void)val; // Currently per-entity widgets are updated via on_state_entity_changed
-}
-
 static void ui_show_spinner(void)
 {
     lvgl_port_lock(-1);
@@ -404,8 +431,6 @@ static void ui_hide_spinner(void)
 
 static void on_state_entity_changed(const state::Entity &e)
 {
-    s_state_dirty = true;
-
     // Update widgets for this entity
     if (!s_room_pages.empty())
     {
@@ -438,6 +463,163 @@ static void on_state_entity_changed(const state::Entity &e)
                 break;
             }
         }
+    }
+}
+
+static void ui_build_screensaver(void)
+{
+    if (s_screensaver_root)
+    {
+        return;
+    }
+
+    s_screensaver_root = lv_obj_create(NULL);
+    lv_obj_set_size(s_screensaver_root, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(s_screensaver_root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(s_screensaver_root, 0, 0);
+    lv_obj_remove_flag(s_screensaver_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_weather_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_weather_label, "");
+    lv_obj_set_style_text_color(s_weather_label, lv_color_hex(0xE6E6E6), 0);
+    lv_obj_set_style_text_font(s_weather_label, &Montserrat_40, 0);
+    lv_obj_align(s_weather_label, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void idle_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+
+    lv_display_t *disp = lv_display_get_default();
+    if (!disp)
+    {
+        return;
+    }
+
+    uint32_t inactive_ms = lv_display_get_inactive_time(disp);
+
+    if (s_ui_mode == UiMode::Rooms)
+    {
+        if (inactive_ms >= kScreensaverTimeoutMs && s_screensaver_root)
+        {
+            lv_disp_load_scr(s_screensaver_root);
+            s_ui_mode = UiMode::Screensaver;
+        }
+    }
+}
+
+static void trim_ws(std::string &s)
+{
+    size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n'))
+        ++start;
+    size_t end = s.size();
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n'))
+        --end;
+    s.assign(s.begin() + static_cast<long>(start), s.begin() + static_cast<long>(end));
+}
+
+static bool parse_weather_csv(const char *csv, float &out_temp, std::string &out_cond)
+{
+    if (!csv)
+        return false;
+
+    std::string data(csv);
+    std::string line;
+    size_t pos = 0;
+
+    auto next_line = [&](std::string &out) -> bool {
+        if (pos >= data.size())
+            return false;
+        size_t start = pos;
+        while (pos < data.size() && data[pos] != '\n' && data[pos] != '\r')
+            ++pos;
+        size_t end = pos;
+        while (pos < data.size() && (data[pos] == '\n' || data[pos] == '\r'))
+            ++pos;
+        out.assign(data.begin() + static_cast<long>(start), data.begin() + static_cast<long>(end));
+        return true;
+    };
+
+    // Skip header line
+    if (!next_line(line))
+        return false;
+
+    // Find first non-empty data line
+    std::string data_line;
+    while (next_line(data_line))
+    {
+        trim_ws(data_line);
+        if (!data_line.empty())
+            break;
+    }
+
+    if (data_line.empty())
+        return false;
+
+    size_t comma = data_line.find(',');
+    if (comma == std::string::npos)
+        return false;
+
+    std::string temp_str = data_line.substr(0, comma);
+    std::string cond_str = data_line.substr(comma + 1);
+    trim_ws(temp_str);
+    trim_ws(cond_str);
+
+    char *endp = nullptr;
+    float temp = std::strtof(temp_str.c_str(), &endp);
+    if (endp == temp_str.c_str())
+    {
+        // Failed to parse number
+        return false;
+    }
+
+    out_temp = temp;
+    out_cond = std::move(cond_str);
+    return true;
+}
+
+static void weather_task(void *arg)
+{
+    (void)arg;
+    char buf[256];
+
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        if (!wifi_manager_is_connected())
+        {
+            continue;
+        }
+
+        int status = 0;
+        const char *token = (kWeatherToken && kWeatherToken[0]) ? kWeatherToken : nullptr;
+        esp_err_t err = http_send("POST", kWeatherUrl, kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG_UI, "Weather HTTP error: %s", esp_err_to_name(err));
+            continue;
+        }
+        if (status < 200 || status >= 300)
+        {
+            ESP_LOGW(TAG_UI, "Weather HTTP status %d", status);
+            continue;
+        }
+
+        float temp_c = 0.0f;
+        std::string cond;
+        if (!parse_weather_csv(buf, temp_c, cond))
+        {
+            ESP_LOGW(TAG_UI, "Failed to parse weather CSV");
+            continue;
+        }
+
+        state::set_weather(temp_c, cond);
+
+        lvgl_port_lock(-1);
+        ui_update_weather_label();
+        lvgl_port_unlock();
     }
 }
 
@@ -570,6 +752,36 @@ namespace // room pages impl
                     lv_obj_add_event_cb(w.control, switch_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
                 }
             }
+        }
+
+        ui_update_weather_label();
+    }
+
+    static void ui_update_weather_label()
+    {
+        state::WeatherState w = state::weather();
+        char buf[64];
+
+        if (w.valid)
+        {
+            std::snprintf(buf, sizeof(buf), "%.1f°C, %s", w.temperature_c, w.condition.c_str());
+        }
+        else
+        {
+            std::snprintf(buf, sizeof(buf), "--°C, --");
+        }
+
+        for (auto &page : s_room_pages)
+        {
+            if (page.weather_label)
+            {
+                lv_label_set_text(page.weather_label, buf);
+            }
+        }
+
+        if (s_weather_label)
+        {
+            lv_label_set_text(s_weather_label, buf);
         }
     }
 
