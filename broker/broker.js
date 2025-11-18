@@ -79,6 +79,7 @@ function preview(buf) {
 const entityStates = {
     'switch.wifi_breaker_t_switch_1': 'OFF',
     'switch.wifi_breaker_t_switch_2': 'OFF',
+    'switch.wifi_breaker_t_switch_3': 'OFF',
 };
 
 function toggleState(id) {
@@ -167,7 +168,9 @@ const httpServer = http.createServer((req, res) => {
             res.end(
                 'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
                 '\n' +
-                'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Relay_01,off\n'
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Relay_01,off\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Relay_02,off\n' +
+                'koridor,Коридор,switch.wifi_breaker_t_switch_3,Relay_03,off\n'
             );
         });
         return;

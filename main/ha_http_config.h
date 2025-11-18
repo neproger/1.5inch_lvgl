@@ -5,8 +5,8 @@
 // Example URL: "http://192.168.1.100:8080/api/template"
 
 #ifndef HA_HTTP_BOOTSTRAP_URL
-#define HA_HTTP_BOOTSTRAP_URL1 "http://192.168.0.105:8080/api/template"
-#define HA_HTTP_BOOTSTRAP_URL "http://192.168.1.185:8123/api/template"
+#define HA_HTTP_BOOTSTRAP_URL "http://192.168.0.105:8080/api/template"
+#define HA_HTTP_BOOTSTRAP_URL1 "http://192.168.1.185:8123/api/template"
 #endif
 
 // If your endpoint requires Bearer auth, put the long token here.

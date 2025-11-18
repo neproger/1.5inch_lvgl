@@ -12,234 +12,66 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <string>
+#include <cstdlib>
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 static const char *TAG_UI = "UI";
-static lv_obj_t *s_status_label = NULL;
-static lv_obj_t *s_status_ring = NULL;
-static lv_obj_t *s_info_label = NULL; /* Secondary info/description label */
-static lv_obj_t *s_background = NULL;
 static TaskHandle_t s_ha_req_task = NULL;
-static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
-static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
-static const int s_ui_items_count = app::g_entity_count;
-static int s_cur_item = 0;
 static volatile bool s_state_dirty = true;
 static std::vector<int> s_state_subscriptions;
 
-static bool s_screensaver = false;
 static int64_t s_last_input_us = 0;
-static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
+static lv_obj_t *s_spinner = NULL;
+static std::string s_pending_toggle_entity;
 
-// Draw circular border positioned by center (cx, cy) and radius.
-static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
-static void handle_single_click(void);
-static void ha_ui_timer_cb(void *arg);
-static void ha_toggle_task(void *arg);
-static void ui_show_current_item(void);
-static void ui_enter_screensaver(void);
-static void ui_exit_screensaver(void);
-static void ui_refresh_current_state(void);
-static void on_state_entity_changed(const state::Entity &e);
-void setInfo(const char *text);
-void setLabel(const char *text);
-static const char *get_entity_name_for_index(int index);
-static const char *get_entity_id_for_index(int index);
-static const char *get_entity_state_for_index(int index);
-static int get_ui_items_count();
-
-namespace // class UiScreen
+namespace // room pages
 {
-
-    enum class UiScreen
+    struct DeviceWidget
     {
-        Kitchen,
-        Hallway,
-        ScreenSaver
+        std::string entity_id;
+        std::string name;
+        lv_obj_t *container = nullptr;
+        lv_obj_t *label = nullptr;
+        lv_obj_t *control = nullptr; // e.g. lv_switch
     };
 
-    static UiScreen s_current_screen = UiScreen::ScreenSaver;
-
-    static lv_obj_t *s_kitchen_scr = nullptr;
-    static lv_obj_t *s_hallway_scr = nullptr;
-    static lv_obj_t *s_screen_saver_scr = nullptr;
-
-    // Виджеты для Kitchen
-    static lv_obj_t *s_kitchen_title = nullptr;
-    static lv_obj_t *s_kitchen_state_label = nullptr;
-
-    // Виджеты для Hallway
-    static lv_obj_t *s_hallway_title = nullptr;
-    static lv_obj_t *s_hallway_state_label = nullptr;
-
-    // Виджеты для ScreenSaver
-    static lv_obj_t *s_ss_title = nullptr;
-
-    // Если у тебя где-то был общий статус-обруч — можешь
-    static lv_obj_t *ring = nullptr;
-} // namespace
-
-namespace // ui_show_screen
-{
-
-    void ui_show_screen(UiScreen scr)
+    struct RoomPage
     {
-        if (scr == s_current_screen)
-        {
-            return;
-        }
-        s_current_screen = scr;
+        std::string area_id;
+        std::string area_name;
+        lv_obj_t *root = nullptr;
+        lv_obj_t *title_label = nullptr;
+        lv_obj_t *list_container = nullptr;
+        std::vector<DeviceWidget> devices;
+    };
 
-        switch (scr)
-        {
-        case UiScreen::Kitchen:
-            if (s_kitchen_scr)
-            {
-                lv_screen_load(s_kitchen_scr);
-            }
-            break;
-        case UiScreen::Hallway:
-            if (s_hallway_scr)
-            {
-                lv_screen_load(s_hallway_scr);
-            }
-            break;
-        case UiScreen::ScreenSaver:
-            if (s_screen_saver_scr)
-            {
-                lv_screen_load(s_screen_saver_scr);
-            }
-            break;
-        }
-    }
+    static std::vector<RoomPage> s_room_pages;
+    static int s_current_room_index = 0;
+    static int s_current_device_index = 0;
 
-} // namespace
+    static void ui_build_room_pages();
+}
 
-namespace // ui_build_kitchen_screen
-{
-    static void ui_build_kitchen_screen()
-    {
-        const auto &ents = state::entities();
-        for (size_t i = 0; i < ents.size(); ++i)
-        {
-            ESP_LOGI(TAG_UI, "entity[%d]: id=%s state=%s",
-                     static_cast<int>(i),
-                     ents[i].id.c_str(),
-                     ents[i].state.c_str());
-        }
-        s_kitchen_scr = lv_obj_create(NULL);
-        lv_obj_set_style_bg_color(s_kitchen_scr, lv_color_hex(0x000000), 0);
-        // lv_obj_set_style_bg_opa(s_kitchen_scr, LV_OPA_COVER, 0);
-        // Заголовок "Kitchen"
-        s_kitchen_title = lv_label_create(s_kitchen_scr);
-        lv_label_set_text(s_kitchen_title, "Kitchen");
-        lv_obj_set_style_text_color(s_kitchen_title, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_set_style_text_font(s_kitchen_title, &Montserrat_20, 0);
-        lv_obj_align(s_kitchen_title, LV_ALIGN_TOP_MID, 0, 40);
-
-        // Статус девайса/группы (пока заглушка)
-        s_kitchen_state_label = lv_label_create(s_kitchen_scr);
-        lv_label_set_text(s_kitchen_state_label, "Кухня");
-        lv_obj_set_style_text_color(s_kitchen_state_label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_set_style_text_font(s_kitchen_state_label, &Montserrat_20, 0);
-        lv_obj_align(s_kitchen_state_label, LV_ALIGN_BOTTOM_MID, 0, -40);
-
-        // Если хочешь, можно сюда же перенести твой perimeter ring:
-        /*
-        int w = lv_obj_get_width(s_kitchen_scr);
-        int h = lv_obj_get_height(s_kitchen_scr);
-        int margin = 1;
-        int r = (w < h ? w : h) / 2 - margin;
-        if (r < 4)
-            r = (w < h ? w : h) / 2 - 1;
-        s_status_ring = create_perimeter_ring(s_kitchen_scr, w / 2, h / 2, r, 0, 2, lv_color_hex(0xFF0000));
-        */
-    }
-
-} // namespace
-
-namespace // ui_build_hallway_screen
-{
-
-    static void ui_build_hallway_screen()
-    {
-        s_hallway_scr = lv_obj_create(NULL);
-
-        s_hallway_title = lv_label_create(s_hallway_scr);
-        lv_label_set_text(s_hallway_title, "Hallway");
-        lv_obj_set_style_text_color(s_hallway_title, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_set_style_text_font(s_hallway_title, &Montserrat_20, 0);
-        lv_obj_align(s_hallway_title, LV_ALIGN_TOP_MID, 0, 40);
-
-        s_hallway_state_label = lv_label_create(s_hallway_scr);
-        lv_label_set_text(s_hallway_state_label, "Холл");
-        lv_obj_set_style_text_color(s_hallway_state_label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_set_style_text_font(s_hallway_state_label, &Montserrat_20, 0);
-        lv_obj_align(s_hallway_state_label, LV_ALIGN_BOTTOM_MID, 0, -40);
-    }
-
-} // namespace
-
-namespace // ui_build_screensaver_screen
-{
-
-    static void ui_build_screensaver_screen()
-    {
-        s_screen_saver_scr = lv_obj_create(NULL);
-
-        s_ss_title = lv_label_create(s_screen_saver_scr);
-        lv_label_set_text(s_ss_title, "KazDEV");
-        lv_obj_set_style_text_color(s_ss_title, lv_color_hex(0x404040), 0);
-        lv_obj_set_style_text_font(s_ss_title, &Montserrat_20, 0);
-        lv_obj_align(s_ss_title, LV_ALIGN_CENTER, 0, 0);
-    }
-
-} // namespace
-
-namespace // update_state
-{
-
-    void ui_update_kitchen_state(const char *state_text)
-    {
-        if (s_kitchen_state_label)
-        {
-            lv_label_set_text_fmt(s_kitchen_state_label, "State: %s", state_text);
-        }
-    }
-
-    void ui_update_hallway_state(const char *state_text)
-    {
-        if (s_hallway_state_label)
-        {
-            lv_label_set_text_fmt(s_hallway_state_label, "State: %s", state_text);
-        }
-    }
-
-} // namespace
-
+static void handle_single_click(void);
+static void ha_toggle_task(void *arg);
+static void ui_show_current_item(void);
+static void ui_refresh_current_state(void);
+static void on_state_entity_changed(const state::Entity &e);
+static void ui_show_spinner(void);
+static void ui_hide_spinner(void);
+static lv_obj_t *background = nullptr;
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
     s_last_input_us = esp_timer_get_time();
-
-    // Set the theme
-    // lv_disp_t *dispp = lv_disp_get_default();
-    // lv_theme_t *theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED), true, LV_FONT_DEFAULT);
-    // lv_disp_set_theme(dispp, theme);
-
-    // 1. Построить все скрины
-    ui_build_kitchen_screen();
-    ui_build_hallway_screen();
-    ui_build_screensaver_screen();
-
-    // 2. Показать стартовый (можно ScreenSaver или Kitchen)
-    lv_disp_load_scr(s_kitchen_scr);
-    // или:
-    // ui_show_screen(UiScreen::Kitchen);
+    background = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(background, lv_color_hex(0x000000), 0);
+    ui_build_room_pages();
 
     // 3. Таймер для UI — оставляем твой код
     {
@@ -250,36 +82,6 @@ void ui_app_init(void)
             if (id > 0)
                 s_state_subscriptions.push_back(id);
         }
-    }
-
-    if (s_ha_ui_timer == NULL)
-    {
-        esp_timer_create_args_t args = {};
-        args.callback = &ha_ui_timer_cb;
-        args.name = "ui_ha_upd";
-        esp_timer_create(&args, &s_ha_ui_timer);
-        esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
-    }
-
-    // 4. �������� ����������� �������� ���\r\n    ui_refresh_current_state();
-}
-
-static void ha_ui_timer_cb(void *arg)
-{
-    (void)arg;
-    bool online = router::is_connected();
-    if (!s_screensaver && s_state_dirty)
-    {
-        s_state_dirty = false;
-        ui_refresh_current_state();
-    }
-    if (!s_screensaver && online != s_last_online && s_status_ring)
-    {
-        lvgl_port_lock(-1);
-        lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
-        lv_obj_set_style_border_color(s_status_ring, col, 0);
-        lvgl_port_unlock();
-        s_last_online = online;
     }
 }
 
@@ -295,25 +97,43 @@ extern "C" void LVGL_knob_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
-    if (s_screensaver)
-    {
-        ui_exit_screensaver();
-        return;
-    }
+
     switch (ev)
     {
     case 0:
-        s_cur_item = (s_cur_item + 1) % get_ui_items_count();
-        ui_show_current_item();
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            s_current_room_index = (s_current_room_index + 1) % rooms;
+            s_current_device_index = 0;
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+            ui_show_current_item();
+        }
         break;
     case 1:
-        s_cur_item = (s_cur_item - 1 + get_ui_items_count()) % get_ui_items_count();
-        ui_show_current_item();
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            s_current_room_index = (s_current_room_index - 1 + rooms) % rooms;
+            s_current_device_index = 0;
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+            ui_show_current_item();
+        }
         break;
     default:
         break;
     }
-    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, get_entity_name_for_index(s_cur_item));
+
+    if (!s_room_pages.empty())
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        const char *room_name = page.area_name.c_str();
+        ESP_LOGI(TAG_UI, "%s | room=%d/%d %s",
+                 knob_event_table[ev],
+                 s_current_room_index,
+                 static_cast<int>(s_room_pages.size()),
+                 room_name);
+    }
 }
 
 static const char *button_event_table[] = {
@@ -334,11 +154,7 @@ extern "C" void LVGL_button_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
-    if (s_screensaver)
-    {
-        ui_exit_screensaver();
-        return;
-    }
+
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
     switch (ev)
@@ -346,14 +162,6 @@ extern "C" void LVGL_button_event(void *event)
     case 4:
         ESP_LOGI(TAG_UI, "%s", label);
         handle_single_click();
-        break;
-    case 5:
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
-        break;
-    case 7:
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
         break;
     default:
         break;
@@ -365,37 +173,84 @@ static void handle_single_click(void)
     int64_t now = esp_timer_get_time();
     if (now - s_last_toggle_us < 700 * 1000)
     {
-        setLabel("WAIT");
         return;
     }
     if (!router::is_connected())
     {
-        setLabel("No MQTT");
+        ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
         return;
     }
+
+    // Determine current entity ID and show spinner
+    std::string entity_id;
+
+    if (!s_room_pages.empty() &&
+        s_current_room_index >= 0 &&
+        s_current_room_index < static_cast<int>(s_room_pages.size()))
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        if (!page.devices.empty() &&
+            s_current_device_index >= 0 &&
+            s_current_device_index < static_cast<int>(page.devices.size()))
+        {
+            entity_id = page.devices[static_cast<size_t>(s_current_device_index)].entity_id;
+        }
+    }
+
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "No entity selected for toggle");
+        return;
+    }
+
+    s_pending_toggle_entity = entity_id;
+    ui_show_spinner();
+
     if (s_ha_req_task == NULL)
     {
-        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 4096, NULL, 4, &s_ha_req_task);
+        char *arg = static_cast<char *>(std::malloc(entity_id.size() + 1));
+        if (!arg)
+        {
+            ESP_LOGE(TAG_UI, "No memory for toggle arg");
+            s_pending_toggle_entity.clear();
+            ui_hide_spinner();
+            return;
+        }
+        std::memcpy(arg, entity_id.c_str(), entity_id.size() + 1);
+
+        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 4096, arg, 4, &s_ha_req_task);
         if (ok != pdPASS)
         {
+            std::free(arg);
+            s_ha_req_task = NULL;
             ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
+            s_pending_toggle_entity.clear();
+            ui_hide_spinner();
         }
     }
 }
 
 static void ha_toggle_task(void *arg)
 {
-    (void)arg;
-    // setInfo("...");
+    char *entity = static_cast<char *>(arg);
+
     if (!wifi_manager_is_connected())
     {
-        setInfo("No WiFi");
+        ESP_LOGW(TAG_UI, "No WiFi, cannot toggle entity");
+        if (entity)
+            std::free(entity);
+        s_pending_toggle_entity.clear();
+        ui_hide_spinner();
         s_ha_req_task = NULL;
         vTaskDelete(NULL);
         return;
     }
-    const char *entity = get_entity_id_for_index(s_cur_item);
+
     esp_err_t err = router::toggle(entity);
+
+    if (entity)
+        std::free(entity);
+
     if (err == ESP_OK)
     {
         s_last_toggle_us = esp_timer_get_time();
@@ -403,7 +258,9 @@ static void ha_toggle_task(void *arg)
     }
     else
     {
-        setInfo("MQTT ERR");
+        ESP_LOGW(TAG_UI, "MQTT toggle error: %d", (int)err);
+        s_pending_toggle_entity.clear();
+        ui_hide_spinner();
     }
     s_ha_req_task = NULL;
     vTaskDelete(NULL);
@@ -411,169 +268,206 @@ static void ha_toggle_task(void *arg)
 
 static void ui_show_current_item(void)
 {
-    setLabel(get_entity_name_for_index(s_cur_item));
+    if (!s_room_pages.empty() &&
+        s_current_room_index >= 0 &&
+        s_current_room_index < static_cast<int>(s_room_pages.size()))
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        if (!page.devices.empty() &&
+            s_current_device_index >= 0 &&
+            s_current_device_index < static_cast<int>(page.devices.size()))
+        {
+            const DeviceWidget &w = page.devices[static_cast<size_t>(s_current_device_index)];
+            (void)w;
+            ui_refresh_current_state();
+            return;
+        }
+    }
+
     ui_refresh_current_state();
-}
-
-static void ui_enter_screensaver(void)
-{
-    s_screensaver = true;
-    devices_set_backlight_percent(10);
-    lvgl_port_lock(-1);
-    if (s_status_label)
-    {
-        lv_label_set_text(s_status_label, "");
-    }
-    lvgl_port_unlock();
-}
-
-static void ui_exit_screensaver(void)
-{
-    s_screensaver = false;
-    devices_set_backlight_percent(90);
-    lvgl_port_lock(-1);
-    if (s_status_ring)
-    {
-        lv_obj_set_style_border_width(s_status_ring, 2, 0);
-        lv_color_t col = s_last_online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
-        lv_obj_set_style_border_color(s_status_ring, col, 0);
-    }
-    lvgl_port_unlock();
-    ui_show_current_item();
-    s_last_input_us = esp_timer_get_time();
-}
-
-static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)
-{
-    (void)n; /* not used */
-    int border_w = (d > 0) ? d : 2;
-    if (radius < 2)
-        radius = 2;
-    int side = radius * 2;
-    lv_obj_t *ring = lv_obj_create(parent);
-    lv_obj_remove_style_all(ring);
-    lv_obj_set_size(ring, side, side);
-    int parent_w = lv_obj_get_width(parent);
-    int parent_h = lv_obj_get_height(parent);
-    int off_x = cx - parent_w / 2;
-    int off_y = cy - parent_h / 2;
-    lv_obj_align(ring, LV_ALIGN_CENTER, off_x, off_y);
-    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(ring, border_w, 0);
-    lv_obj_set_style_border_color(ring, color, 0);
-    return ring;
 }
 
 static void ui_refresh_current_state(void)
 {
-    const char *val = get_entity_state_for_index(s_cur_item);
-    setInfo(val && val[0] ? val : "-");
+    const char *val = nullptr;
+
+    if (!s_room_pages.empty() &&
+        s_current_room_index >= 0 &&
+        s_current_room_index < static_cast<int>(s_room_pages.size()))
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        if (!page.devices.empty() &&
+            s_current_device_index >= 0 &&
+            s_current_device_index < static_cast<int>(page.devices.size()))
+        {
+            const DeviceWidget &w = page.devices[static_cast<size_t>(s_current_device_index)];
+            const state::Entity *e = state::find_entity(w.entity_id);
+            if (e)
+            {
+                val = e->state.c_str();
+            }
+        }
+    }
+
+    (void)val; // Currently per-entity widgets are updated via on_state_entity_changed
 }
 
-static void on_state_entity_changed(const state::Entity & /*e*/)
+static void ui_show_spinner(void)
+{
+    lvgl_port_lock(-1);
+    if (s_spinner)
+    {
+        lv_obj_del(s_spinner);
+        s_spinner = NULL;
+    }
+    lv_obj_t *scr = lv_screen_active();
+    s_spinner = lv_spinner_create(scr);
+    lv_obj_set_size(s_spinner, 24, 24);
+    lv_obj_align(s_spinner, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lvgl_port_unlock();
+}
+
+static void ui_hide_spinner(void)
+{
+    lvgl_port_lock(-1);
+    if (s_spinner)
+    {
+        lv_obj_del(s_spinner);
+        s_spinner = NULL;
+    }
+    lvgl_port_unlock();
+}
+
+static void on_state_entity_changed(const state::Entity &e)
 {
     s_state_dirty = true;
-}
 
-static const char *get_entity_name_for_index(int index)
-{
-    if (index < 0)
-        return "";
-    const auto &ents = state::entities();
-    if (!ents.empty())
+    // Update widgets for this entity
+    if (!s_room_pages.empty())
     {
-        if (index < static_cast<int>(ents.size()))
-            return ents[static_cast<size_t>(index)].name.c_str();
-        return "";
-    }
-    if (index < app::g_entity_count)
-        return app::g_entities[index].name;
-    return "";
-}
-
-static const char *get_entity_id_for_index(int index)
-{
-    if (index < 0)
-        return "";
-    const auto &ents = state::entities();
-    if (!ents.empty())
-    {
-        if (index < static_cast<int>(ents.size()))
-            return ents[static_cast<size_t>(index)].id.c_str();
-        return "";
-    }
-    if (index < app::g_entity_count)
-        return app::g_entities[index].entity_id;
-    return "";
-}
-
-static const char *get_entity_state_for_index(int index)
-{
-    if (index < 0)
-        return "";
-    const auto &ents = state::entities();
-    if (!ents.empty())
-    {
-        if (index < static_cast<int>(ents.size()))
-            return ents[static_cast<size_t>(index)].state.c_str();
-        return "";
-    }
-    return "";
-}
-
-static int get_ui_items_count()
-{
-    const auto &ents = state::entities();
-    if (!ents.empty())
-        return static_cast<int>(ents.size());
-    return app::g_entity_count;
-}
-
-extern "C" void setLabel(const char *text)
-{
-    if (!text)
-        text = "";
-    lvgl_port_lock(-1);
-    if (s_status_label == NULL)
-    {
-        lv_obj_t *scr = lv_screen_active();
-        s_status_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
-        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_center(s_status_label);
-    }
-    lv_label_set_text(s_status_label, text);
-    lvgl_port_unlock();
-}
-
-void setInfo(const char *text)
-{
-    if (!text)
-        text = "";
-    lvgl_port_lock(-1);
-    if (s_info_label == NULL)
-    {
-        lv_obj_t *scr = lv_screen_active();
-        s_info_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_info_label, &Montserrat_40, 0);
-        lv_obj_set_style_text_color(s_info_label, lv_color_hex(0xA0A0A0), 0);
-        if (s_status_label)
+        for (auto &page : s_room_pages)
         {
-            lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-        }
-        else
-        {
-            lv_obj_center(s_info_label);
+            if (page.area_id != e.area_id)
+                continue;
+
+            for (auto &w : page.devices)
+            {
+                if (w.entity_id != e.id)
+                    continue;
+
+                if (w.control)
+                {
+                    bool is_on = (e.state == "on" || e.state == "ON" ||
+                                  e.state == "true" || e.state == "TRUE" ||
+                                  e.state == "1");
+                    lvgl_port_lock(-1);
+                    if (is_on)
+                    {
+                        lv_obj_add_state(w.control, LV_STATE_CHECKED);
+                    }
+                    else
+                    {
+                        lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+                    }
+                    lvgl_port_unlock();
+                }
+                break;
+            }
         }
     }
-    lv_label_set_text(s_info_label, text);
-    if (s_status_label)
+
+    // If this is the entity we just toggled – hide spinner
+    if (!s_pending_toggle_entity.empty() && e.id == s_pending_toggle_entity)
     {
-        lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+        s_pending_toggle_entity.clear();
+        ui_hide_spinner();
     }
-    lvgl_port_unlock();
 }
 
+namespace // room pages impl
+{
+    static void ui_build_room_pages()
+    {
+        s_room_pages.clear();
 
+        const auto &areas = state::areas();
+        const auto &entities = state::entities();
 
+        if (areas.empty())
+        {
+            ESP_LOGW(TAG_UI, "ui_build_room_pages: no areas defined");
+            return;
+        }
+
+        s_room_pages.reserve(areas.size());
+
+        for (const auto &area : areas)
+        {
+            RoomPage page;
+            page.area_id = area.id;
+            page.area_name = area.name;
+
+            page.root = lv_obj_create(NULL);
+            lv_obj_set_style_bg_color(page.root, lv_color_hex(0x000000), 0);
+
+            page.title_label = lv_label_create(page.root);
+            lv_label_set_text(page.title_label, page.area_name.c_str());
+            lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
+            lv_obj_set_style_text_font(page.title_label, &Montserrat_20, 0);
+            lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 40);
+
+            page.list_container = lv_obj_create(page.root);
+            lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(page.list_container, 0, 0);
+            lv_obj_set_size(page.list_container, LV_PCT(100), LV_PCT(100));
+            lv_obj_align(page.list_container, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+            // Добавляем виджеты устройств для этой комнаты
+            for (size_t i = 0; i < entities.size(); ++i)
+            {
+                const auto &ent = entities[i];
+                if (ent.area_id != area.id)
+                    continue;
+
+                DeviceWidget w;
+                w.entity_id = ent.id;
+                w.name = ent.name;
+                w.container = lv_obj_create(page.list_container);
+                lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
+                lv_obj_set_style_border_width(w.container, 0, 0);
+                lv_obj_set_width(w.container, LV_PCT(100));
+                lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_ROW);
+
+                w.label = lv_label_create(w.container);
+                lv_label_set_text(w.label, ent.name.c_str());
+                lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
+                lv_obj_set_style_text_font(w.label, &Montserrat_20, 0);
+                lv_obj_align(w.label, LV_ALIGN_LEFT_MID, 8, 0);
+
+                // Switch control for binary entities (initial state from current value)
+                w.control = lv_switch_create(w.container);
+                lv_obj_align(w.control, LV_ALIGN_RIGHT_MID, -8, 0);
+
+                bool is_on = (ent.state == "on" || ent.state == "ON" ||
+                              ent.state == "true" || ent.state == "TRUE" ||
+                              ent.state == "1");
+                if (is_on)
+                {
+                    lv_obj_add_state(w.control, LV_STATE_CHECKED);
+                }
+                else
+                {
+                    lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+                }
+
+                page.devices.push_back(std::move(w));
+            }
+
+            s_room_pages.push_back(std::move(page));
+        }
+    }
+
+} // namespace
+
+// Legacy overlay labels (status/info) removed in new UI:
+// each entity is represented by its own widget on the room page.
