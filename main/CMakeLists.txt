@@ -3,11 +3,12 @@ idf_component_register(
         "main.cpp"
         "devices_init.c"
         "ui_app.cpp"
-        
         "wifi_manager.c"
         "ha_mqtt.cpp"
+        "app/router.cpp"
+        "app/entities.cpp"
+        "state_manager.cpp"
         "http_utils.cpp"
-       
         "../fonts/Montserrat_20.c"
         "../fonts/Montserrat_40.c"
     INCLUDE_DIRS

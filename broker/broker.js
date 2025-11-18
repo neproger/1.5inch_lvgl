@@ -15,6 +15,7 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const aedes = require('aedes')();
 
 function loadEnvFile(envPath) {
@@ -50,16 +51,18 @@ function getStr(name, def) {
     return v == null || v === '' ? def : v;
 }
 
-const BROKER_HOST = getStr('BROKER_HOST', '127.0.0.1');
+const BROKER_HOST = getStr('BROKER_HOST', '0.0.0.0');
 const BROKER_PORT = Number(getStr('BROKER_PORT', '1884'));
 const BROKER_USERNAME = getStr('BROKER_USERNAME', '');
 const BROKER_PASSWORD = getStr('BROKER_PASSWORD', '');
 const BROKER_LOG_HEX = getBool('BROKER_LOG_HEX', true);
 const BROKER_LOG_MAX_BYTES = Number(getStr('BROKER_LOG_MAX_BYTES', '256'));
+const HTTP_PORT = Number(getStr('HTTP_PORT', '8080'));
 
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
     aedes.authenticate = (client, username, password, done) => {
+        console.log("Authenticate: ", username, password)
         const pwd = password ? password.toString('utf8') : '';
         const ok = username === BROKER_USERNAME && pwd === BROKER_PASSWORD;
         if (!ok) return done(new Error('Auth failed'), false);
@@ -70,6 +73,22 @@ if (BROKER_USERNAME || BROKER_PASSWORD) {
 function preview(buf) {
     const b = buf.length > BROKER_LOG_MAX_BYTES ? buf.slice(0, BROKER_LOG_MAX_BYTES) : buf;
     return BROKER_LOG_HEX ? b.toString('hex') : b.toString('utf8');
+}
+
+// Простое хранилище состояний наших двух тестовых свитчей
+const entityStates = {
+    'switch.wifi_breaker_t_switch_1': 'OFF',
+    'switch.wifi_breaker_t_switch_2': 'OFF',
+    'switch.wifi_breaker_t_switch_3': 'OFF',
+    'switch.wifi_breaker_t_switch_4': 'OFF',
+    'switch.wifi_breaker_t_switch_5': 'OFF',
+};
+
+function toggleState(id) {
+    const cur = entityStates[id] || 'OFF';
+    const next = cur === 'ON' ? 'OFF' : 'ON';
+    entityStates[id] = next;
+    return next;
 }
 
 // Logging hooks
@@ -92,9 +111,41 @@ aedes.on('unsubscribe', (subs, client) => {
 aedes.on('publish', (packet, client) => {
     // Skip $SYS noise
     if (!packet || !packet.topic || packet.topic.startsWith('$SYS')) return;
+
     const from = client ? `id=${client.id}` : 'broker';
-    const pl = packet.payload ? preview(Buffer.isBuffer(packet.payload) ? packet.payload : Buffer.from(String(packet.payload))) : '';
-    console.log(`[broker] publish ${from} -> topic=${packet.topic} qos=${packet.qos} retain=${packet.retain} bytes=${packet.payload ? packet.payload.length : 0} :: ${pl}`);
+    const plBuf = packet.payload
+        ? (Buffer.isBuffer(packet.payload) ? packet.payload : Buffer.from(String(packet.payload)))
+        : Buffer.alloc(0);
+    const pl = preview(plBuf);
+
+    console.log(`[broker] publish ${from} -> topic=${packet.topic} qos=${packet.qos} retain=${packet.retain} bytes=${plBuf.length} :: ${pl}`);
+
+    // --- ЛОГИКА ТЕСТОВЫХ СВИТЧЕЙ ---
+
+    // Реагируем только на команды от клиента, а не на собственные публикации брокера
+     if (client && packet.topic === 'ha/cmd/toggle') {
+        const entityId = plBuf.toString('utf8').trim();
+        // console.log(`[logic] toggle requested for "${entityId}"`);
+
+        // если такой entity отслеживается – переключаем его самого
+        if (entityStates[entityId] !== undefined) {
+            const prev = entityStates[entityId];
+            const newState = toggleState(entityId);
+            const stateTopic = `ha/state/${entityId}`;
+            const statePayload = Buffer.from(newState, 'utf8');
+
+            // console.log(
+            //     `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
+            // );
+
+            aedes.publish({
+                topic: stateTopic,
+                payload: statePayload,
+                qos: 1,
+                retain: true,
+            });
+        }
+    }
 });
 
 const server = net.createServer(aedes.handle);
@@ -102,9 +153,46 @@ server.listen(BROKER_PORT, BROKER_HOST, () => {
     console.log('[broker] listening', { BROKER_HOST, BROKER_PORT, auth: !!(BROKER_USERNAME || BROKER_PASSWORD) });
 });
 
+// Simple HTTP endpoint emulating HA /api/template
+const httpServer = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/api/template') {
+        let body = '';
+        req.on('data', (chunk) => {
+            body += chunk;
+            if (body.length > 10240) {
+                // prevent abuse
+                req.socket.destroy();
+            }
+        });
+        req.on('end', () => {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+            res.end(
+                'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
+                '\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,off\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Розетка,off\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
+                'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Розетка,off\n' +
+                'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,off\n'
+            );
+        });
+        return;
+    }
+
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.end('Not found');
+});
+
+httpServer.listen(HTTP_PORT, BROKER_HOST, () => {
+    console.log('[http] listening', { host: BROKER_HOST, port: HTTP_PORT, path: '/api/template' });
+});
+
 function shutdown() {
     console.log('\n[broker] shutting down...');
     try { server.close(); } catch (_) { }
+    try { httpServer.close(); } catch (_) { }
     try { aedes.close(() => process.exit(0)); } catch (_) { process.exit(0); }
 }
 process.on('SIGINT', shutdown);

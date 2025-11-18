@@ -3,7 +3,6 @@
 #include "esp_log.h"
 #include "esp_event.h"
 #include "mqtt_client.h"
-
 #include "ha_mqtt.hpp"
 #include "ha_mqtt_config.h"
 

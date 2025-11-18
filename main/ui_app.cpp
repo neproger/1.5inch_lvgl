@@ -1,143 +1,142 @@
-#include "ui_app.h"
+﻿#include "ui_app.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
 #include "fonts.h"
-#include "ha_mqtt.hpp"
-#include "ha_mqtt_config.h"
+#include "app/router.hpp"
+#include "app/entities.hpp"
+#include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
+#include "http_utils.h"
+#include "ha_http_config.h"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <cstdio>
 #include "cJSON.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG_UI = "UI";
-static lv_obj_t *s_status_label = NULL;
-static lv_obj_t *s_status_ring = NULL;
-static lv_obj_t *s_info_label = NULL; /* Secondary info/description label */
 static TaskHandle_t s_ha_req_task = NULL;
-static esp_timer_handle_t s_ha_ui_timer = NULL; /* periodic UI updater */
-static bool s_last_online = false;
 static int64_t s_last_toggle_us = 0; /* simple cooldown to avoid hammering */
 
-/* Multi-state UI: selectable HA entities + screensaver */
-typedef struct
-{
-    const char *name;      /* shown */
-    const char *entity_id; /* HA entity */
-} ui_item_t;
-
-static const ui_item_t s_ui_items[] = {
-    {"Кухня", "switch.wifi_breaker_t_switch_1"},
-    {"Коридор", "switch.wifi_breaker_t_switch_2"},
-};
-static const int s_ui_items_count = sizeof(s_ui_items) / sizeof(s_ui_items[0]);
-static int s_cur_item = 0;
-
-static bool s_screensaver = false;
+static std::vector<int> s_state_subscriptions;
 static int64_t s_last_input_us = 0;
-static const int64_t SCREENSAVER_TIMEOUT_US = 30LL * 1000 * 1000; /* 30 s */
+static lv_obj_t *s_spinner = NULL;
+static std::string s_pending_toggle_entity;
+static TaskHandle_t s_weather_task = NULL;
 
-// Draw circular border positioned by center (cx, cy) and radius.
-static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color);
-static void handle_single_click(void);
-static void ha_ui_timer_cb(void *arg);
-static void ha_toggle_task(void *arg);
-static void ui_show_current_item(void);
-static void ui_enter_screensaver(void);
-static void ui_exit_screensaver(void);
-void setInfo(const char *text);
-void setLabel(const char *text);
-
-static char s_item_state[s_ui_items_count][12] = {"-", "-"};
-static void ui_mqtt_on_msg(const char *topic, const char *data, int len)
+enum class UiMode
 {
-    const char prefix[] = "ha/state/";
-    const size_t pfx_len = sizeof(prefix) - 1;
-    if (!topic)
-        return;
-    ESP_LOGI(TAG_UI, "MQTT msg received: topic='%s', len=%d, data='%.*s'", topic, len, len, data ? data : "");
-    if (strncmp(topic, prefix, pfx_len) != 0)
-        return;
-    const char *ent = topic + pfx_len;
-    for (int i = 0; i < s_ui_items_count; ++i)
+    Rooms,
+    Screensaver
+};
+
+static UiMode s_ui_mode = UiMode::Rooms;
+static lv_obj_t *s_screensaver_root = NULL;
+static lv_obj_t *s_weather_label = NULL;
+static lv_timer_t *s_idle_timer = NULL;
+static const uint32_t kScreensaverTimeoutMs = 5000;
+
+static constexpr const char *kWeatherUrl = HA_HTTP_BOOTSTRAP_URL;
+static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
+static const char *kWeatherTemplateBody = R"json(
+{
+  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}°C, {{ w.state if w else 'N/A' }}"
+}
+)json";
+
+namespace // room pages
+{
+    struct DeviceWidget
     {
-        if (strcmp(ent, s_ui_items[i].entity_id) == 0)
+        std::string entity_id;
+        std::string name;
+        lv_obj_t *container = nullptr;
+        lv_obj_t *label = nullptr;
+        lv_obj_t *control = nullptr; // e.g. lv_switch
+    };
+
+    struct RoomPage
+    {
+        std::string area_id;
+        std::string area_name;
+        lv_obj_t *root = nullptr;
+        lv_obj_t *title_label = nullptr;
+        lv_obj_t *list_container = nullptr;
+        lv_obj_t *weather_label = nullptr;
+        std::vector<DeviceWidget> devices;
+    };
+
+    static std::vector<RoomPage> s_room_pages;
+    static int s_current_room_index = 0;
+    static int s_current_device_index = 0;
+
+    static void ui_build_room_pages();
+    static void ui_update_weather_label();
+}
+
+static void handle_single_click(void);
+static void ha_toggle_task(void *arg);
+static void trigger_toggle_for_entity(const std::string &entity_id);
+static void switch_event_cb(lv_event_t *e);
+static void on_state_entity_changed(const state::Entity &e);
+static void ui_show_spinner(void);
+static void ui_hide_spinner(void);
+static void weather_task(void *arg);
+static void ui_build_screensaver(void);
+static void idle_timer_cb(lv_timer_t *timer);
+void ui_app_init(void)
+{
+    // Время последнего ввода (как у тебя было)
+    s_last_input_us = esp_timer_get_time();
+    ui_build_room_pages();
+
+    // стартовый экран и стартовый элемент
+    if (!s_room_pages.empty())
+    {
+        s_current_room_index = 0;
+        s_current_device_index = 0;
+        lv_disp_load_scr(s_room_pages[0].root);
+    }
+
+    // 3. Таймер для UI — оставляем твой код
+    {
+        const auto &ents = state::entities();
+        for (const auto &e : ents)
         {
-            int n = (len < (int)sizeof(s_item_state[i]) - 1) ? len : (int)sizeof(s_item_state[i]) - 1;
-            if (n < 0)
-                n = 0;
-            memcpy(s_item_state[i], data ? data : "", n);
-            s_item_state[i][n] = '\0';
-            if (i == s_cur_item)
-            {
-                setInfo(s_item_state[i]);
-            }
-            break;
+            int id = state::subscribe_entity(e.id, &on_state_entity_changed);
+            if (id > 0)
+                s_state_subscriptions.push_back(id);
+        }
+        // Синхронизируем UI с уже известным состоянием (после bootstrap и MQTT)
+        for (const auto &e : ents) {
+            on_state_entity_changed(e);
         }
     }
 }
 
-extern "C" void ui_app_init(void)
+extern "C" void ui_init_screensaver_support(void)
 {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+    ui_build_screensaver();
+    ui_update_weather_label();
 
-    /* Title label */
-    lv_obj_t *title = lv_label_create(scr);
-    lv_label_set_text(title, "KazDEV");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_set_style_text_font(title, &Montserrat_20, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 40);
-
-    /* Initial selection shown */
-    s_last_input_us = esp_timer_get_time();
-    ui_show_current_item();
-
-    /* Create perimeter ring (red by default) */
-    if (s_status_ring == NULL)
+    if (s_idle_timer == NULL)
     {
-        int w = lv_obj_get_width(scr);
-        int h = lv_obj_get_height(scr);
-        int margin = 1;
-        int r = (w < h ? w : h) / 2 - margin;
-        if (r < 4)
-            r = (w < h ? w : h) / 2 - 1;
-        s_status_ring = create_perimeter_ring(scr, w / 2, h / 2, r, 0, 2, lv_color_hex(0xFF0000));
-    }
-
-    if (s_ha_ui_timer == NULL)
-    {
-        esp_timer_create_args_t args = {};
-        args.callback = &ha_ui_timer_cb;
-        args.name = "ui_ha_upd";
-        esp_timer_create(&args, &s_ha_ui_timer);
-        esp_timer_start_periodic(s_ha_ui_timer, 500 * 1000); /* 0.5s UI refresh */
-    }
-
-    // Subscribe to state topics for each configured entity
-    ha_mqtt::set_message_handler(&ui_mqtt_on_msg);
-    for (int i = 0; i < s_ui_items_count; ++i)
-    {
-        char topic[128];
-        snprintf(topic, sizeof(topic), "ha/state/%s", s_ui_items[i].entity_id);
-        ha_mqtt::subscribe(topic, 1);
+        s_idle_timer = lv_timer_create(idle_timer_cb, 500, NULL);
     }
 }
 
-static void ha_ui_timer_cb(void *arg)
+extern "C" void ui_start_weather_polling(void)
 {
-    (void)arg;
-    bool online = false;
-    online = ha_mqtt::is_connected();
-    if (!s_screensaver && online != s_last_online && s_status_ring)
+    if (s_weather_task == NULL)
     {
-        lvgl_port_lock(-1);
-        lv_color_t col = online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
-        lv_obj_set_style_border_color(s_status_ring, col, 0);
-        lvgl_port_unlock();
-        s_last_online = online;
+        xTaskCreate(weather_task, "weather", 4096, NULL, 3, &s_weather_task);
     }
 }
 
@@ -153,25 +152,58 @@ extern "C" void LVGL_knob_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
-    if (s_screensaver)
+
+    lv_display_trigger_activity(NULL);
+
+    if (s_ui_mode == UiMode::Screensaver)
     {
-        ui_exit_screensaver();
+        s_ui_mode = UiMode::Rooms;
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            if (s_current_room_index < 0 || s_current_room_index >= rooms)
+            {
+                s_current_room_index = 0;
+            }
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
         return;
     }
+
     switch (ev)
     {
     case 0:
-        s_cur_item = (s_cur_item + 1) % s_ui_items_count;
-        ui_show_current_item();
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            s_current_room_index = (s_current_room_index + 1) % rooms;
+            s_current_device_index = 0;
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
         break;
     case 1:
-        s_cur_item = (s_cur_item - 1 + s_ui_items_count) % s_ui_items_count;
-        ui_show_current_item();
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            s_current_room_index = (s_current_room_index - 1 + rooms) % rooms;
+            s_current_device_index = 0;
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
         break;
     default:
         break;
     }
-    ESP_LOGI(TAG_UI, "%s | sel=%d:%s", knob_event_table[ev], s_cur_item, s_ui_items[s_cur_item].name);
+
+    if (!s_room_pages.empty())
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        const char *room_name = page.area_name.c_str();
+        ESP_LOGI(TAG_UI, "%s | room=%d/%d %s",
+                 knob_event_table[ev],
+                 s_current_room_index,
+                 static_cast<int>(s_room_pages.size()),
+                 room_name);
+    }
 }
 
 static const char *button_event_table[] = {
@@ -192,11 +224,24 @@ extern "C" void LVGL_button_event(void *event)
 {
     int ev = (int)(intptr_t)event;
     s_last_input_us = esp_timer_get_time();
-    if (s_screensaver)
+
+    lv_display_trigger_activity(NULL);
+
+    if (s_ui_mode == UiMode::Screensaver)
     {
-        ui_exit_screensaver();
+        s_ui_mode = UiMode::Rooms;
+        if (!s_room_pages.empty())
+        {
+            int rooms = static_cast<int>(s_room_pages.size());
+            if (s_current_room_index < 0 || s_current_room_index >= rooms)
+            {
+                s_current_room_index = 0;
+            }
+            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+        }
         return;
     }
+
     const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
     const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
     switch (ev)
@@ -204,14 +249,6 @@ extern "C" void LVGL_button_event(void *event)
     case 4:
         ESP_LOGI(TAG_UI, "%s", label);
         handle_single_click();
-        break;
-    case 5:
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
-        break;
-    case 7:
-        ESP_LOGI(TAG_UI, "%s", label);
-        setLabel(label);
         break;
     default:
         break;
@@ -223,19 +260,77 @@ static void handle_single_click(void)
     int64_t now = esp_timer_get_time();
     if (now - s_last_toggle_us < 700 * 1000)
     {
-        setLabel("WAIT");
         return;
     }
-    if (!ha_mqtt::is_connected())
+    if (!router::is_connected())
     {
-        setLabel("No MQTT");
+        ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
         return;
     }
+
+    std::string entity_id;
+
+    if (!s_room_pages.empty() &&
+        s_current_room_index >= 0 &&
+        s_current_room_index < static_cast<int>(s_room_pages.size()))
+    {
+        const RoomPage &page = s_room_pages[s_current_room_index];
+        if (!page.devices.empty() &&
+            s_current_device_index >= 0 &&
+            s_current_device_index < static_cast<int>(page.devices.size()))
+        {
+            entity_id = page.devices[static_cast<size_t>(s_current_device_index)].entity_id;
+        }
+    }
+
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "No entity selected for toggle");
+        return;
+    }
+
+    trigger_toggle_for_entity(entity_id);
+}
+
+static void trigger_toggle_for_entity(const std::string &entity_id)
+{
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "trigger_toggle_for_entity: empty entity_id");
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_toggle_us < 700 * 1000)
+    {
+        return;
+    }
+    if (!router::is_connected())
+    {
+        ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
+        return;
+    }
+
+    s_pending_toggle_entity = entity_id;
+    ui_show_spinner();
+
     if (s_ha_req_task == NULL)
     {
-        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 6144, NULL, 4, &s_ha_req_task);
+        char *arg = static_cast<char *>(std::malloc(entity_id.size() + 1));
+        if (!arg)
+        {
+            ESP_LOGE(TAG_UI, "No memory for toggle arg");
+            s_pending_toggle_entity.clear();
+            ui_hide_spinner();
+            return;
+        }
+        std::memcpy(arg, entity_id.c_str(), entity_id.size() + 1);
+
+        BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 4096, arg, 4, &s_ha_req_task);
         if (ok != pdPASS)
         {
+            std::free(arg);
+            s_ha_req_task = NULL;
             ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
         }
     }
@@ -243,127 +338,454 @@ static void handle_single_click(void)
 
 static void ha_toggle_task(void *arg)
 {
-    (void)arg;
-    setInfo("-");
+    char *entity = static_cast<char *>(arg);
+
+    s_last_toggle_us = esp_timer_get_time();
+    vTaskDelay(pdMS_TO_TICKS(200));
+
     if (!wifi_manager_is_connected())
     {
-        setInfo("No WiFi");
+        ESP_LOGW(TAG_UI, "No WiFi, cannot toggle entity");
+        if (entity)
+            std::free(entity);
         s_ha_req_task = NULL;
         vTaskDelete(NULL);
         return;
     }
-    const char *entity = s_ui_items[s_cur_item].entity_id;
-    esp_err_t err = ha_mqtt::publish_toggle(entity);
-    if (err == ESP_OK)
+
+    esp_err_t err = router::toggle(entity);
+
+    if (entity)
+        std::free(entity);
+
+    if (err != ESP_OK)
     {
-        s_last_toggle_us = esp_timer_get_time();
-        vTaskDelay(pdMS_TO_TICKS(200));
+        ESP_LOGW(TAG_UI, "MQTT toggle error: %d", (int)err);
     }
-    else
-    {
-        setInfo("MQTT ERR");
-    }
+
     s_ha_req_task = NULL;
+    s_pending_toggle_entity.clear();
+    ui_hide_spinner();
     vTaskDelete(NULL);
 }
 
-static void ui_show_current_item(void)
+static void switch_event_cb(lv_event_t *e)
 {
-    setLabel(s_ui_items[s_cur_item].name);
-    setInfo(s_item_state[s_cur_item]);
-}
-
-static void ui_enter_screensaver(void)
-{
-    s_screensaver = true;
-    devices_set_backlight_percent(10);
-    lvgl_port_lock(-1);
-    if (s_status_label)
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_VALUE_CHANGED)
     {
-        lv_label_set_text(s_status_label, "");
+        return;
     }
-    lvgl_port_unlock();
-}
 
-static void ui_exit_screensaver(void)
-{
-    s_screensaver = false;
-    devices_set_backlight_percent(90);
-    lvgl_port_lock(-1);
-    if (s_status_ring)
+    lv_obj_t *sw = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    std::string entity_id;
+
+    for (const auto &page : s_room_pages)
     {
-        lv_obj_set_style_border_width(s_status_ring, 2, 0);
-        lv_color_t col = s_last_online ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
-        lv_obj_set_style_border_color(s_status_ring, col, 0);
-    }
-    lvgl_port_unlock();
-    ui_show_current_item();
-    s_last_input_us = esp_timer_get_time();
-}
-
-static lv_obj_t *create_perimeter_ring(lv_obj_t *parent, int cx, int cy, int radius, int n, int d, lv_color_t color)
-{
-    (void)n; /* not used */
-    int border_w = (d > 0) ? d : 2;
-    if (radius < 2)
-        radius = 2;
-    int side = radius * 2;
-    lv_obj_t *ring = lv_obj_create(parent);
-    lv_obj_remove_style_all(ring);
-    lv_obj_set_size(ring, side, side);
-    int parent_w = lv_obj_get_width(parent);
-    int parent_h = lv_obj_get_height(parent);
-    int off_x = cx - parent_w / 2;
-    int off_y = cy - parent_h / 2;
-    lv_obj_align(ring, LV_ALIGN_CENTER, off_x, off_y);
-    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(ring, border_w, 0);
-    lv_obj_set_style_border_color(ring, color, 0);
-    return ring;
-}
-
-extern "C" void setLabel(const char *text)
-{
-    if (!text)
-        text = "";
-    lvgl_port_lock(-1);
-    if (s_status_label == NULL)
-    {
-        lv_obj_t *scr = lv_screen_active();
-        s_status_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_status_label, &Montserrat_40, 0);
-        lv_obj_set_style_text_color(s_status_label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_center(s_status_label);
-    }
-    lv_label_set_text(s_status_label, text);
-    lvgl_port_unlock();
-}
-
-void setInfo(const char *text)
-{
-    if (!text)
-        text = "";
-    lvgl_port_lock(-1);
-    if (s_info_label == NULL)
-    {
-        lv_obj_t *scr = lv_screen_active();
-        s_info_label = lv_label_create(scr);
-        lv_obj_set_style_text_font(s_info_label, &Montserrat_40, 0);
-        lv_obj_set_style_text_color(s_info_label, lv_color_hex(0xA0A0A0), 0);
-        if (s_status_label)
+        for (const auto &w : page.devices)
         {
-            lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
+            if (w.control == sw)
+            {
+                entity_id = w.entity_id;
+                break;
+            }
+        }
+        if (!entity_id.empty())
+            break;
+    }
+
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "switch_event_cb: control without entity");
+        return;
+    }
+
+    trigger_toggle_for_entity(entity_id);
+}
+
+static void ui_show_spinner(void)
+{
+    lvgl_port_lock(-1);
+    if (s_spinner)
+    {
+        lv_obj_del(s_spinner);
+        s_spinner = NULL;
+    }
+    lv_obj_t *scr = lv_screen_active();
+    s_spinner = lv_spinner_create(scr);
+    lv_obj_set_size(s_spinner, 24, 24);
+    lv_obj_align(s_spinner, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lvgl_port_unlock();
+}
+
+static void ui_hide_spinner(void)
+{
+    lvgl_port_lock(-1);
+    if (s_spinner)
+    {
+        lv_obj_del(s_spinner);
+        s_spinner = NULL;
+    }
+    lvgl_port_unlock();
+}
+
+static void on_state_entity_changed(const state::Entity &e)
+{
+    // Update widgets for this entity
+    if (!s_room_pages.empty())
+    {
+        for (auto &page : s_room_pages)
+        {
+            if (page.area_id != e.area_id)
+                continue;
+
+            for (auto &w : page.devices)
+            {
+                if (w.entity_id != e.id)
+                    continue;
+
+                if (w.control)
+                {
+                    bool is_on = (e.state == "on" || e.state == "ON" ||
+                                  e.state == "true" || e.state == "TRUE" ||
+                                  e.state == "1");
+                    lvgl_port_lock(-1);
+                    if (is_on)
+                    {
+                        lv_obj_add_state(w.control, LV_STATE_CHECKED);
+                    }
+                    else
+                    {
+                        lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+                    }
+                    lvgl_port_unlock();
+                }
+                break;
+            }
+        }
+    }
+}
+
+static void ui_build_screensaver(void)
+{
+    if (s_screensaver_root)
+    {
+        return;
+    }
+
+    s_screensaver_root = lv_obj_create(NULL);
+    lv_obj_set_size(s_screensaver_root, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(s_screensaver_root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(s_screensaver_root, 0, 0);
+    lv_obj_remove_flag(s_screensaver_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    s_weather_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_weather_label, "");
+    lv_obj_set_style_text_color(s_weather_label, lv_color_hex(0xE6E6E6), 0);
+    lv_obj_set_style_text_font(s_weather_label, &Montserrat_40, 0);
+    lv_obj_align(s_weather_label, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void idle_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+
+    lv_display_t *disp = lv_display_get_default();
+    if (!disp)
+    {
+        return;
+    }
+
+    uint32_t inactive_ms = lv_display_get_inactive_time(disp);
+
+    if (s_ui_mode == UiMode::Rooms)
+    {
+        if (inactive_ms >= kScreensaverTimeoutMs && s_screensaver_root)
+        {
+            lv_disp_load_scr(s_screensaver_root);
+            s_ui_mode = UiMode::Screensaver;
+        }
+    }
+}
+
+static void trim_ws(std::string &s)
+{
+    size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n'))
+        ++start;
+    size_t end = s.size();
+    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n'))
+        --end;
+    s.assign(s.begin() + static_cast<long>(start), s.begin() + static_cast<long>(end));
+}
+
+static bool parse_weather_csv(const char *csv, float &out_temp, std::string &out_cond)
+{
+    if (!csv)
+        return false;
+
+    std::string data(csv);
+    std::string line;
+    size_t pos = 0;
+
+    auto next_line = [&](std::string &out) -> bool {
+        if (pos >= data.size())
+            return false;
+        size_t start = pos;
+        while (pos < data.size() && data[pos] != '\n' && data[pos] != '\r')
+            ++pos;
+        size_t end = pos;
+        while (pos < data.size() && (data[pos] == '\n' || data[pos] == '\r'))
+            ++pos;
+        out.assign(data.begin() + static_cast<long>(start), data.begin() + static_cast<long>(end));
+        return true;
+    };
+
+    // Skip header line
+    if (!next_line(line))
+        return false;
+
+    // Find first non-empty data line
+    std::string data_line;
+    while (next_line(data_line))
+    {
+        trim_ws(data_line);
+        if (!data_line.empty())
+            break;
+    }
+
+    if (data_line.empty())
+        return false;
+
+    size_t comma = data_line.find(',');
+    if (comma == std::string::npos)
+        return false;
+
+    std::string temp_str = data_line.substr(0, comma);
+    std::string cond_str = data_line.substr(comma + 1);
+    trim_ws(temp_str);
+    trim_ws(cond_str);
+
+    char *endp = nullptr;
+    float temp = std::strtof(temp_str.c_str(), &endp);
+    if (endp == temp_str.c_str())
+    {
+        // Failed to parse number
+        return false;
+    }
+
+    out_temp = temp;
+    out_cond = std::move(cond_str);
+    return true;
+}
+
+static void weather_task(void *arg)
+{
+    (void)arg;
+    char buf[256];
+
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        if (!wifi_manager_is_connected())
+        {
+            continue;
+        }
+
+        int status = 0;
+        const char *token = (kWeatherToken && kWeatherToken[0]) ? kWeatherToken : nullptr;
+        esp_err_t err = http_send("POST", kWeatherUrl, kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG_UI, "Weather HTTP error: %s", esp_err_to_name(err));
+            continue;
+        }
+        if (status < 200 || status >= 300)
+        {
+            ESP_LOGW(TAG_UI, "Weather HTTP status %d", status);
+            continue;
+        }
+
+        float temp_c = 0.0f;
+        std::string cond;
+        if (!parse_weather_csv(buf, temp_c, cond))
+        {
+            ESP_LOGW(TAG_UI, "Failed to parse weather CSV");
+            continue;
+        }
+
+        state::set_weather(temp_c, cond);
+
+        lvgl_port_lock(-1);
+        ui_update_weather_label();
+        lvgl_port_unlock();
+    }
+}
+
+namespace // room pages impl
+{
+    static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
+    {
+        DeviceWidget w;
+        w.entity_id = ent.id;
+        w.name = ent.name;
+        w.container = lv_obj_create(page.list_container);
+        lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(w.container, 0, 0);
+        lv_obj_set_width(w.container, LV_PCT(100));
+        lv_obj_set_height(w.container, LV_SIZE_CONTENT); // важное место
+        lv_obj_set_style_pad_ver(w.container, 8, 0);     // вертикальные отступы
+        lv_obj_set_style_pad_hor(w.container, 8, 0);     // горизонтальные отступы
+        lv_obj_set_style_pad_row(w.container, 30, 0);    // вертикальный gap между элементами внутри строки
+
+        // lv_obj_set_style_pad_row(w.container, 12, 0);
+        lv_obj_remove_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
+        // высота авто по содержимому
+        lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(
+            w.container,
+            LV_FLEX_ALIGN_CENTER, // горизонталь: центр
+            LV_FLEX_ALIGN_CENTER, // вертикаль: центр
+            LV_FLEX_ALIGN_CENTER);
+
+        w.label = lv_label_create(w.container);
+        lv_label_set_text(w.label, ent.name.c_str());
+        lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_set_style_text_font(w.label, &Montserrat_40, 0);
+
+        // Switch control for binary entities (initial state from current value)
+        w.control = lv_switch_create(w.container);
+        // вертикальная ориентация
+        lv_switch_set_orientation(w.control, LV_SWITCH_ORIENTATION_VERTICAL);
+        lv_obj_set_style_width(w.control, 100, LV_PART_MAIN);
+        lv_obj_set_style_height(w.control, 160, LV_PART_MAIN);
+
+        bool is_on = (ent.state == "on" || ent.state == "ON" ||
+                      ent.state == "true" || ent.state == "TRUE" ||
+                      ent.state == "1");
+        if (is_on)
+        {
+            lv_obj_add_state(w.control, LV_STATE_CHECKED);
         }
         else
         {
-            lv_obj_center(s_info_label);
+            lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+        }
+
+        page.devices.push_back(std::move(w));
+    }
+
+    static void ui_build_room_pages()
+    {
+        s_room_pages.clear();
+
+        const auto &areas = state::areas();
+        const auto &entities = state::entities();
+
+        if (areas.empty())
+        {
+            ESP_LOGW(TAG_UI, "ui_build_room_pages: no areas defined");
+            return;
+        }
+
+        s_room_pages.reserve(areas.size());
+
+        for (const auto &area : areas)
+        {
+            RoomPage page;
+            page.area_id = area.id;
+            page.area_name = area.name;
+
+            page.root = lv_obj_create(NULL);
+            lv_obj_set_size(page.root, LV_HOR_RES, LV_VER_RES);
+            lv_obj_set_style_bg_color(page.root, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_border_width(page.root, 0, 0);
+            lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
+
+            page.title_label = lv_label_create(page.root);
+            lv_label_set_text(page.title_label, page.area_name.c_str());
+            lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
+            lv_obj_set_style_text_font(page.title_label, &Montserrat_20, 0);
+            lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 40);
+
+            // list_container – только он скроллится
+            page.list_container = lv_obj_create(page.root);
+            lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(page.list_container, 0, 0);
+
+            // занимаем всё под заголовком
+            int top = 80; // отступ под title
+            lv_obj_set_size(page.list_container, LV_PCT(90), LV_VER_RES - top);
+            lv_obj_align(page.list_container, LV_ALIGN_TOP_MID, 0, top);
+
+            // включаем вертикальный скролл и flex-колонку
+            lv_obj_set_scroll_dir(page.list_container, LV_DIR_VER);
+            lv_obj_set_scrollbar_mode(page.list_container, LV_SCROLLBAR_MODE_AUTO);
+            lv_obj_set_flex_flow(page.list_container, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(page.list_container,
+                                  LV_FLEX_ALIGN_START, // main axis
+                                  LV_FLEX_ALIGN_START, // cross axis
+                                  LV_FLEX_ALIGN_START);
+
+            // Добавляем виджеты устройств для этой комнаты
+            for (size_t i = 0; i < entities.size(); ++i)
+            {
+                const auto &ent = entities[i];
+                if (ent.area_id != area.id)
+                    continue;
+
+                // Пока все сущности отображаем как переключатели.
+                // В будущем можно выбирать тип виджета по типу устройства.
+                ui_add_switch_widget(page, ent);
+            }
+
+            s_room_pages.push_back(std::move(page));
+        }
+
+        for (auto &page : s_room_pages)
+        {
+            for (auto &w : page.devices)
+            {
+                if (w.control)
+                {
+                    lv_obj_add_event_cb(w.control, switch_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+                }
+            }
+        }
+
+        ui_update_weather_label();
+    }
+
+    static void ui_update_weather_label()
+    {
+        state::WeatherState w = state::weather();
+        char buf[64];
+
+        if (w.valid)
+        {
+            std::snprintf(buf, sizeof(buf), "%.1f°C, %s", w.temperature_c, w.condition.c_str());
+        }
+        else
+        {
+            std::snprintf(buf, sizeof(buf), "--°C, --");
+        }
+
+        for (auto &page : s_room_pages)
+        {
+            if (page.weather_label)
+            {
+                lv_label_set_text(page.weather_label, buf);
+            }
+        }
+
+        if (s_weather_label)
+        {
+            lv_label_set_text(s_weather_label, buf);
         }
     }
-    lv_label_set_text(s_info_label, text);
-    if (s_status_label)
-    {
-        lv_obj_align_to(s_info_label, s_status_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
-    }
-    lvgl_port_unlock();
-}
+
+} // namespace
+
+// Legacy overlay labels (status/info) removed in new UI:
+// each entity is represented by its own widget on the room page.

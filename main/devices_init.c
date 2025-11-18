@@ -68,7 +68,8 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 #define EXAMPLE_LCD_BITS_PER_PIXEL (16)
 #define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)
 #define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (160)
+// Reduce LVGL draw buffer height to save RAM on ESP32
+#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
 #define EXAMPLE_LCD_SPI_SPEED_MHZ (40)    /* Was 40 MHz; 26 MHz is safer */
 #define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1) /* Limit in-flight DMA transactions */
@@ -193,7 +194,7 @@ static esp_err_t app_lvgl_init(void)
 {
     const lvgl_port_cfg_t lvgl_cfg = {
         .task_priority = 4,
-        .task_stack = 7096,
+        .task_stack = 6144,
         .task_affinity = -1,
         .task_max_sleep_ms = 500,
         .timer_period_ms = 5,
@@ -382,7 +383,7 @@ esp_err_t devices_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
-    esp_log_level_set("CST816S", ESP_LOG_WARN);
+    esp_log_level_set("CST816S", ESP_LOG_NONE);
     ESP_ERROR_CHECK(app_lvgl_init());
 
     knob_init(BSP_ENCODER_A, BSP_ENCODER_B);
