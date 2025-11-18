@@ -59,19 +59,27 @@ namespace // room pages
 
 static void handle_single_click(void);
 static void ha_toggle_task(void *arg);
+static void trigger_toggle_for_entity(const std::string &entity_id);
+static void switch_event_cb(lv_event_t *e);
 static void ui_show_current_item(void);
 static void ui_refresh_current_state(void);
 static void on_state_entity_changed(const state::Entity &e);
 static void ui_show_spinner(void);
 static void ui_hide_spinner(void);
-static lv_obj_t *background = nullptr;
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
     s_last_input_us = esp_timer_get_time();
-    background = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(background, lv_color_hex(0x000000), 0);
     ui_build_room_pages();
+
+    // стартовый экран и стартовый элемент
+    if (!s_room_pages.empty())
+    {
+        s_current_room_index = 0;
+        s_current_device_index = 0;
+        lv_disp_load_scr(s_room_pages[0].root);
+        ui_show_current_item();  // чтобы сразу подтянуть state для первого девайса
+    }
 
     // 3. Таймер для UI — оставляем твой код
     {
@@ -81,6 +89,10 @@ void ui_app_init(void)
             int id = state::subscribe_entity(e.id, &on_state_entity_changed);
             if (id > 0)
                 s_state_subscriptions.push_back(id);
+        }
+        // Синхронизируем UI с уже известным состоянием (после bootstrap и MQTT)
+        for (const auto &e : ents) {
+            on_state_entity_changed(e);
         }
     }
 }
@@ -181,7 +193,6 @@ static void handle_single_click(void)
         return;
     }
 
-    // Determine current entity ID and show spinner
     std::string entity_id;
 
     if (!s_room_pages.empty() &&
@@ -200,6 +211,28 @@ static void handle_single_click(void)
     if (entity_id.empty())
     {
         ESP_LOGW(TAG_UI, "No entity selected for toggle");
+        return;
+    }
+
+    trigger_toggle_for_entity(entity_id);
+}
+
+static void trigger_toggle_for_entity(const std::string &entity_id)
+{
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "trigger_toggle_for_entity: empty entity_id");
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_toggle_us < 700 * 1000)
+    {
+        return;
+    }
+    if (!router::is_connected())
+    {
+        ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
         return;
     }
 
@@ -224,8 +257,6 @@ static void handle_single_click(void)
             std::free(arg);
             s_ha_req_task = NULL;
             ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
-            s_pending_toggle_entity.clear();
-            ui_hide_spinner();
         }
     }
 }
@@ -239,8 +270,6 @@ static void ha_toggle_task(void *arg)
         ESP_LOGW(TAG_UI, "No WiFi, cannot toggle entity");
         if (entity)
             std::free(entity);
-        s_pending_toggle_entity.clear();
-        ui_hide_spinner();
         s_ha_req_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -259,11 +288,46 @@ static void ha_toggle_task(void *arg)
     else
     {
         ESP_LOGW(TAG_UI, "MQTT toggle error: %d", (int)err);
-        s_pending_toggle_entity.clear();
-        ui_hide_spinner();
     }
+
     s_ha_req_task = NULL;
+    s_pending_toggle_entity.clear();
+    ui_hide_spinner();
     vTaskDelete(NULL);
+}
+
+static void switch_event_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_VALUE_CHANGED)
+    {
+        return;
+    }
+
+    lv_obj_t *sw = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    std::string entity_id;
+
+    for (const auto &page : s_room_pages)
+    {
+        for (const auto &w : page.devices)
+        {
+            if (w.control == sw)
+            {
+                entity_id = w.entity_id;
+                break;
+            }
+        }
+        if (!entity_id.empty())
+            break;
+    }
+
+    if (entity_id.empty())
+    {
+        ESP_LOGW(TAG_UI, "switch_event_cb: control without entity");
+        return;
+    }
+
+    trigger_toggle_for_entity(entity_id);
 }
 
 static void ui_show_current_item(void)
@@ -375,17 +439,61 @@ static void on_state_entity_changed(const state::Entity &e)
             }
         }
     }
-
-    // If this is the entity we just toggled – hide spinner
-    if (!s_pending_toggle_entity.empty() && e.id == s_pending_toggle_entity)
-    {
-        s_pending_toggle_entity.clear();
-        ui_hide_spinner();
-    }
 }
 
 namespace // room pages impl
 {
+    static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
+    {
+        DeviceWidget w;
+        w.entity_id = ent.id;
+        w.name = ent.name;
+        w.container = lv_obj_create(page.list_container);
+        lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(w.container, 0, 0);
+        lv_obj_set_width(w.container, LV_PCT(100));
+        lv_obj_set_height(w.container, LV_SIZE_CONTENT); // важное место
+        lv_obj_set_style_pad_ver(w.container, 8, 0);     // вертикальные отступы
+        lv_obj_set_style_pad_hor(w.container, 8, 0);     // горизонтальные отступы
+        lv_obj_set_style_pad_row(w.container, 30, 0);    // вертикальный gap между элементами внутри строки
+
+        // lv_obj_set_style_pad_row(w.container, 12, 0);
+        lv_obj_remove_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
+        // высота авто по содержимому
+        lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(
+            w.container,
+            LV_FLEX_ALIGN_CENTER, // горизонталь: центр
+            LV_FLEX_ALIGN_CENTER, // вертикаль: центр
+            LV_FLEX_ALIGN_CENTER);
+
+        w.label = lv_label_create(w.container);
+        lv_label_set_text(w.label, ent.name.c_str());
+        lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
+        lv_obj_set_style_text_font(w.label, &Montserrat_40, 0);
+
+        // Switch control for binary entities (initial state from current value)
+        w.control = lv_switch_create(w.container);
+        // вертикальная ориентация
+        lv_switch_set_orientation(w.control, LV_SWITCH_ORIENTATION_VERTICAL);
+        lv_obj_set_style_width(w.control, 100, LV_PART_MAIN);
+        lv_obj_set_style_height(w.control, 160, LV_PART_MAIN);
+
+        bool is_on = (ent.state == "on" || ent.state == "ON" ||
+                      ent.state == "true" || ent.state == "TRUE" ||
+                      ent.state == "1");
+        if (is_on)
+        {
+            lv_obj_add_state(w.control, LV_STATE_CHECKED);
+        }
+        else
+        {
+            lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+        }
+
+        page.devices.push_back(std::move(w));
+    }
+
     static void ui_build_room_pages()
     {
         s_room_pages.clear();
@@ -408,7 +516,10 @@ namespace // room pages impl
             page.area_name = area.name;
 
             page.root = lv_obj_create(NULL);
+            lv_obj_set_size(page.root, LV_HOR_RES, LV_VER_RES);
             lv_obj_set_style_bg_color(page.root, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_border_width(page.root, 0, 0);
+            lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
 
             page.title_label = lv_label_create(page.root);
             lv_label_set_text(page.title_label, page.area_name.c_str());
@@ -416,11 +527,24 @@ namespace // room pages impl
             lv_obj_set_style_text_font(page.title_label, &Montserrat_20, 0);
             lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 40);
 
+            // list_container – только он скроллится
             page.list_container = lv_obj_create(page.root);
             lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(page.list_container, 0, 0);
-            lv_obj_set_size(page.list_container, LV_PCT(100), LV_PCT(100));
-            lv_obj_align(page.list_container, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+            // занимаем всё под заголовком
+            int top = 80; // отступ под title
+            lv_obj_set_size(page.list_container, LV_PCT(90), LV_VER_RES - top);
+            lv_obj_align(page.list_container, LV_ALIGN_TOP_MID, 0, top);
+
+            // включаем вертикальный скролл и flex-колонку
+            lv_obj_set_scroll_dir(page.list_container, LV_DIR_VER);
+            lv_obj_set_scrollbar_mode(page.list_container, LV_SCROLLBAR_MODE_AUTO);
+            lv_obj_set_flex_flow(page.list_container, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(page.list_container,
+                                  LV_FLEX_ALIGN_START, // main axis
+                                  LV_FLEX_ALIGN_START, // cross axis
+                                  LV_FLEX_ALIGN_START);
 
             // Добавляем виджеты устройств для этой комнаты
             for (size_t i = 0; i < entities.size(); ++i)
@@ -429,41 +553,23 @@ namespace // room pages impl
                 if (ent.area_id != area.id)
                     continue;
 
-                DeviceWidget w;
-                w.entity_id = ent.id;
-                w.name = ent.name;
-                w.container = lv_obj_create(page.list_container);
-                lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
-                lv_obj_set_style_border_width(w.container, 0, 0);
-                lv_obj_set_width(w.container, LV_PCT(100));
-                lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_ROW);
-
-                w.label = lv_label_create(w.container);
-                lv_label_set_text(w.label, ent.name.c_str());
-                lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
-                lv_obj_set_style_text_font(w.label, &Montserrat_20, 0);
-                lv_obj_align(w.label, LV_ALIGN_LEFT_MID, 8, 0);
-
-                // Switch control for binary entities (initial state from current value)
-                w.control = lv_switch_create(w.container);
-                lv_obj_align(w.control, LV_ALIGN_RIGHT_MID, -8, 0);
-
-                bool is_on = (ent.state == "on" || ent.state == "ON" ||
-                              ent.state == "true" || ent.state == "TRUE" ||
-                              ent.state == "1");
-                if (is_on)
-                {
-                    lv_obj_add_state(w.control, LV_STATE_CHECKED);
-                }
-                else
-                {
-                    lv_obj_clear_state(w.control, LV_STATE_CHECKED);
-                }
-
-                page.devices.push_back(std::move(w));
+                // Пока все сущности отображаем как переключатели.
+                // В будущем можно выбирать тип виджета по типу устройства.
+                ui_add_switch_widget(page, ent);
             }
 
             s_room_pages.push_back(std::move(page));
+        }
+
+        for (auto &page : s_room_pages)
+        {
+            for (auto &w : page.devices)
+            {
+                if (w.control)
+                {
+                    lv_obj_add_event_cb(w.control, switch_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+                }
+            }
         }
     }
 

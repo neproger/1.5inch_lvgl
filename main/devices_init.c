@@ -383,7 +383,7 @@ esp_err_t devices_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
 
     ESP_ERROR_CHECK(app_touch_init());
-    esp_log_level_set("CST816S", ESP_LOG_WARN);
+    esp_log_level_set("CST816S", ESP_LOG_NONE);
     ESP_ERROR_CHECK(app_lvgl_init());
 
     knob_init(BSP_ENCODER_A, BSP_ENCODER_B);
