@@ -9,6 +9,7 @@
 #include "devices_init.h"
 #include "wifi_manager.h"
 #include "http_manager.hpp"
+#include "icons.h"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -39,6 +40,7 @@ static UiMode s_ui_mode = UiMode::Rooms;
 static lv_obj_t *s_screensaver_root = NULL;
 static lv_obj_t *s_weather_temp_label = NULL;
 static lv_obj_t *s_weather_cond_label = NULL;
+static lv_obj_t *s_weather_icon = NULL;
 static lv_timer_t *s_idle_timer = NULL;
 static const uint32_t kScreensaverTimeoutMs = 5000;
 
@@ -471,13 +473,20 @@ static void ui_build_screensaver(void)
     lv_label_set_text(s_weather_temp_label, "");
     lv_obj_set_style_text_color(s_weather_temp_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_temp_label, &Montserrat_70, 0);
-    lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, 0);
 
     s_weather_cond_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_cond_label, "");
     lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_40, 0);
-    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 70);
+
+    s_weather_icon = lv_image_create(s_screensaver_root);
+    lv_image_set_src(s_weather_icon, &clear);
+    // Recolor icons to white so they are visible on black background
+    lv_obj_set_style_img_recolor(s_weather_icon, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(s_weather_icon, LV_OPA_COVER, 0);
+    lv_obj_align(s_weather_icon, LV_ALIGN_CENTER, 0, -90);
 }
 
 static void idle_timer_cb(lv_timer_t *timer)
@@ -648,17 +657,110 @@ namespace // room pages impl
         state::WeatherState w = state::weather();
 
         char temp_buf[32];
-        char cond_buf[64];
+        const char *cond_text = nullptr;
+        const lv_image_dsc_t *icon = &alien;
 
         if (w.valid)
         {
             std::snprintf(temp_buf, sizeof(temp_buf), "%.1f°C", w.temperature_c);
-            std::snprintf(cond_buf, sizeof(cond_buf), "%s", w.condition.c_str());
+
+            const std::string &cond = w.condition;
+            if (cond == "clear")
+            {
+                cond_text = "ясно";
+                icon = &clear;
+            }
+            else if (cond == "clear-night")
+            {
+                cond_text = "ясно";
+                icon = &clear_night;
+            }
+            else if (cond == "sunny")
+            {
+                cond_text = "солнечно";
+                icon = &sunny;
+            }
+            else if (cond == "partlycloudy")
+            {
+                cond_text = "переменная облачность";
+                icon = &partlycloudy;
+            }
+            else if (cond == "cloudy")
+            {
+                cond_text = "облачно";
+                icon = &cloudy;
+            }
+            else if (cond == "overcast")
+            {
+                cond_text = "пасмурно";
+                icon = &overcast;
+            }
+            else if (cond == "rainy")
+            {
+                cond_text = "дождь";
+                icon = &rainy;
+            }
+            else if (cond == "pouring")
+            {
+                cond_text = "ливень";
+                icon = &pouring;
+            }
+            else if (cond == "lightning")
+            {
+                cond_text = "гроза";
+                icon = &lightning;
+            }
+            else if (cond == "lightning-rainy")
+            {
+                cond_text = "гроза с дождём";
+                icon = &lightning_rainy;
+            }
+            else if (cond == "snowy")
+            {
+                cond_text = "снег";
+                icon = &snowy;
+            }
+            else if (cond == "snowy-rainy")
+            {
+                cond_text = "снег с дождём";
+                icon = &snowy_rainy;
+            }
+            else if (cond == "hail")
+            {
+                cond_text = "град";
+                icon = &hail;
+            }
+            else if (cond == "fog")
+            {
+                cond_text = "туман";
+                icon = &fog;
+            }
+            else if (cond == "windy")
+            {
+                cond_text = "ветрено";
+                icon = &windy;
+            }
+            else if (cond == "windy-variant")
+            {
+                cond_text = "ветрено, переменная погода";
+                icon = &windy_variant;
+            }
+            else if (cond == "exceptional")
+            {
+                cond_text = "экстремальные условия";
+                icon = &alien;
+            }
+            else
+            {
+                cond_text = w.condition.c_str();
+                icon = &alien;
+            }
         }
         else
         {
             std::snprintf(temp_buf, sizeof(temp_buf), "--°C");
-            std::snprintf(cond_buf, sizeof(cond_buf), "--");
+            cond_text = "--";
+            icon = &alien;
         }
 
         for (auto &page : s_room_pages)
@@ -675,7 +777,11 @@ namespace // room pages impl
         }
         if (s_weather_cond_label)
         {
-            lv_label_set_text(s_weather_cond_label, cond_buf);
+            lv_label_set_text(s_weather_cond_label, cond_text ? cond_text : "");
+        }
+        if (s_weather_icon && icon)
+        {
+            lv_image_set_src(s_weather_icon, icon);
         }
     }
 
