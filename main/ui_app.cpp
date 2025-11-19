@@ -469,6 +469,13 @@ static void ui_build_screensaver(void)
     lv_obj_set_style_border_width(s_screensaver_root, 0, 0);
     lv_obj_remove_flag(s_screensaver_root, LV_OBJ_FLAG_SCROLLABLE);
 
+    s_weather_icon = lv_image_create(s_screensaver_root);
+    lv_image_set_src(s_weather_icon, &clear);
+    // Recolor icons to white so they are visible on black background
+    lv_obj_set_style_img_recolor(s_weather_icon, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(s_weather_icon, LV_OPA_COVER, 0);
+    lv_obj_align(s_weather_icon, LV_ALIGN_CENTER, 0, -120);
+
     s_weather_temp_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_temp_label, "");
     lv_obj_set_style_text_color(s_weather_temp_label, lv_color_hex(0xFFFFFF), 0);
@@ -478,15 +485,8 @@ static void ui_build_screensaver(void)
     s_weather_cond_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_cond_label, "");
     lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_40, 0);
-    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 70);
-
-    s_weather_icon = lv_image_create(s_screensaver_root);
-    lv_image_set_src(s_weather_icon, &clear);
-    // Recolor icons to white so they are visible on black background
-    lv_obj_set_style_img_recolor(s_weather_icon, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_img_recolor_opa(s_weather_icon, LV_OPA_COVER, 0);
-    lv_obj_align(s_weather_icon, LV_ALIGN_CENTER, 0, -90);
+    lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_30, 0);
+    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 80);
 }
 
 static void idle_timer_cb(lv_timer_t *timer)

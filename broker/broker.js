@@ -183,7 +183,7 @@ const httpServer = http.createServer((req, res) => {
                 // Matches expected CSV header + single data line
                 res.end(
                     'Temperature,Condition\n' +
-                    '13.5°C, clear-night\n'
+                    '13.5°C, sunny\n' //clear-night
                 );
             } else {
                 // Default bootstrap CSV with areas/entities
