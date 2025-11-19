@@ -38,7 +38,6 @@ static esp_lcd_panel_handle_t lcd_panel = NULL;
 static lv_display_t *lvgl_disp = NULL;
 static lv_indev_t *lvgl_touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
-static TaskHandle_t s_touch_dbg_task = NULL;
 
 /* Backlight PWM (LEDC) */
 static bool s_bk_ledc_inited = false;

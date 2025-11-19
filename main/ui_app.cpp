@@ -8,8 +8,7 @@
 #include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
-#include "http_utils.h"
-#include "ha_http_config.h"
+#include "http_manager.hpp"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -29,7 +28,6 @@ static std::vector<int> s_state_subscriptions;
 static int64_t s_last_input_us = 0;
 static lv_obj_t *s_spinner = NULL;
 static std::string s_pending_toggle_entity;
-static TaskHandle_t s_weather_task = NULL;
 
 enum class UiMode
 {
@@ -39,17 +37,10 @@ enum class UiMode
 
 static UiMode s_ui_mode = UiMode::Rooms;
 static lv_obj_t *s_screensaver_root = NULL;
-static lv_obj_t *s_weather_label = NULL;
+static lv_obj_t *s_weather_temp_label = NULL;
+static lv_obj_t *s_weather_cond_label = NULL;
 static lv_timer_t *s_idle_timer = NULL;
 static const uint32_t kScreensaverTimeoutMs = 5000;
-
-static constexpr const char *kWeatherUrl = HA_HTTP_BOOTSTRAP_URL;
-static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
-static const char *kWeatherTemplateBody = R"json(
-{
-  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}, {{ w.state if w else 'N/A' }}"
-}
-)json";
 
 namespace // room pages
 {
@@ -88,7 +79,7 @@ static void switch_event_cb(lv_event_t *e);
 static void on_state_entity_changed(const state::Entity &e);
 static void ui_show_spinner(void);
 static void ui_hide_spinner(void);
-static void weather_task(void *arg);
+static void on_weather_updated_from_http(void);
 static void ui_build_screensaver(void);
 static void idle_timer_cb(lv_timer_t *timer);
 void ui_app_init(void)
@@ -134,10 +125,7 @@ extern "C" void ui_init_screensaver_support(void)
 
 extern "C" void ui_start_weather_polling(void)
 {
-    if (s_weather_task == NULL)
-    {
-        xTaskCreate(weather_task, "weather", 4096, NULL, 3, &s_weather_task);
-    }
+    http_manager::start_weather_polling(&on_weather_updated_from_http);
 }
 
 static const char *knob_event_table[] = {
@@ -479,11 +467,17 @@ static void ui_build_screensaver(void)
     lv_obj_set_style_border_width(s_screensaver_root, 0, 0);
     lv_obj_remove_flag(s_screensaver_root, LV_OBJ_FLAG_SCROLLABLE);
 
-    s_weather_label = lv_label_create(s_screensaver_root);
-    lv_label_set_text(s_weather_label, "");
-    lv_obj_set_style_text_color(s_weather_label, lv_color_hex(0xE6E6E6), 0);
-    lv_obj_set_style_text_font(s_weather_label, &Montserrat_40, 0);
-    lv_obj_align(s_weather_label, LV_ALIGN_CENTER, 0, 0);
+    s_weather_temp_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_weather_temp_label, "");
+    lv_obj_set_style_text_color(s_weather_temp_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_weather_temp_label, &Montserrat_70, 0);
+    lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, -30);
+
+    s_weather_cond_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_weather_cond_label, "");
+    lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_40, 0);
+    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 40);
 }
 
 static void idle_timer_cb(lv_timer_t *timer)
@@ -508,119 +502,11 @@ static void idle_timer_cb(lv_timer_t *timer)
     }
 }
 
-static void trim_ws(std::string &s)
+static void on_weather_updated_from_http(void)
 {
-    size_t start = 0;
-    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\r' || s[start] == '\n'))
-        ++start;
-    size_t end = s.size();
-    while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r' || s[end - 1] == '\n'))
-        --end;
-    s.assign(s.begin() + static_cast<long>(start), s.begin() + static_cast<long>(end));
-}
-
-static bool parse_weather_csv(const char *csv, float &out_temp, std::string &out_cond)
-{
-    if (!csv)
-        return false;
-
-    std::string data(csv);
-    std::string line;
-    size_t pos = 0;
-
-    auto next_line = [&](std::string &out) -> bool {
-        if (pos >= data.size())
-            return false;
-        size_t start = pos;
-        while (pos < data.size() && data[pos] != '\n' && data[pos] != '\r')
-            ++pos;
-        size_t end = pos;
-        while (pos < data.size() && (data[pos] == '\n' || data[pos] == '\r'))
-            ++pos;
-        out.assign(data.begin() + static_cast<long>(start), data.begin() + static_cast<long>(end));
-        return true;
-    };
-
-    // Skip header line
-    if (!next_line(line))
-        return false;
-
-    // Find first non-empty data line
-    std::string data_line;
-    while (next_line(data_line))
-    {
-        trim_ws(data_line);
-        if (!data_line.empty())
-            break;
-    }
-
-    if (data_line.empty())
-        return false;
-
-    size_t comma = data_line.find(',');
-    if (comma == std::string::npos)
-        return false;
-
-    std::string temp_str = data_line.substr(0, comma);
-    std::string cond_str = data_line.substr(comma + 1);
-    trim_ws(temp_str);
-    trim_ws(cond_str);
-
-    char *endp = nullptr;
-    float temp = std::strtof(temp_str.c_str(), &endp);
-    if (endp == temp_str.c_str())
-    {
-        // Failed to parse number
-        return false;
-    }
-
-    out_temp = temp;
-    out_cond = std::move(cond_str);
-    return true;
-}
-
-static void weather_task(void *arg)
-{
-    (void)arg;
-    char buf[256];
-
-    for (;;)
-    {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-
-        if (!wifi_manager_is_connected())
-        {
-            continue;
-        }
-
-        int status = 0;
-        const char *token = (kWeatherToken && kWeatherToken[0]) ? kWeatherToken : nullptr;
-        esp_err_t err = http_send("POST", kWeatherUrl, kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
-        if (err != ESP_OK)
-        {
-            ESP_LOGW(TAG_UI, "Weather HTTP error: %s", esp_err_to_name(err));
-            continue;
-        }
-        if (status < 200 || status >= 300)
-        {
-            ESP_LOGW(TAG_UI, "Weather HTTP status %d", status);
-            continue;
-        }
-
-        float temp_c = 0.0f;
-        std::string cond;
-        if (!parse_weather_csv(buf, temp_c, cond))
-        {
-            ESP_LOGW(TAG_UI, "Failed to parse weather CSV");
-            continue;
-        }
-
-        state::set_weather(temp_c, cond);
-
-        lvgl_port_lock(-1);
-        ui_update_weather_label();
-        lvgl_port_unlock();
-    }
+    lvgl_port_lock(-1);
+    ui_update_weather_label();
+    lvgl_port_unlock();
 }
 
 namespace // room pages impl
@@ -760,28 +646,36 @@ namespace // room pages impl
     static void ui_update_weather_label()
     {
         state::WeatherState w = state::weather();
-        char buf[64];
+
+        char temp_buf[32];
+        char cond_buf[64];
 
         if (w.valid)
         {
-            std::snprintf(buf, sizeof(buf), "%.1fC, %s", w.temperature_c, w.condition.c_str());
+            std::snprintf(temp_buf, sizeof(temp_buf), "%.1f°C", w.temperature_c);
+            std::snprintf(cond_buf, sizeof(cond_buf), "%s", w.condition.c_str());
         }
         else
         {
-            std::snprintf(buf, sizeof(buf), "--C, --");
+            std::snprintf(temp_buf, sizeof(temp_buf), "--°C");
+            std::snprintf(cond_buf, sizeof(cond_buf), "--");
         }
 
         for (auto &page : s_room_pages)
         {
             if (page.weather_label)
             {
-                lv_label_set_text(page.weather_label, buf);
+                lv_label_set_text(page.weather_label, temp_buf);
             }
         }
 
-        if (s_weather_label)
+        if (s_weather_temp_label)
         {
-            lv_label_set_text(s_weather_label, buf);
+            lv_label_set_text(s_weather_temp_label, temp_buf);
+        }
+        if (s_weather_cond_label)
+        {
+            lv_label_set_text(s_weather_cond_label, cond_buf);
         }
     }
 
