@@ -84,6 +84,7 @@ static void ui_hide_spinner(void);
 static void on_weather_updated_from_http(void);
 static void ui_build_screensaver(void);
 static void idle_timer_cb(lv_timer_t *timer);
+static void screensaver_input_cb(lv_event_t *e);
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
@@ -487,6 +488,9 @@ static void ui_build_screensaver(void)
     lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_30, 0);
     lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 80);
+
+    // Wake from screensaver on any touch on this screen
+    lv_obj_add_event_cb(s_screensaver_root, screensaver_input_cb, LV_EVENT_PRESSED, nullptr);
 }
 
 static void idle_timer_cb(lv_timer_t *timer)
@@ -518,6 +522,35 @@ static void on_weather_updated_from_http(void)
     lvgl_port_unlock();
 }
 
+static void screensaver_input_cb(lv_event_t *e)
+{
+    if (s_ui_mode != UiMode::Screensaver)
+    {
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_PRESSED)
+    {
+        return;
+    }
+
+    s_ui_mode = UiMode::Rooms;
+    if (!s_room_pages.empty())
+    {
+        int rooms = static_cast<int>(s_room_pages.size());
+        if (s_current_room_index < 0 || s_current_room_index >= rooms)
+        {
+            s_current_room_index = 0;
+        }
+        lv_disp_load_scr(s_room_pages[s_current_room_index].root);
+    }
+
+    /* Сбросить состояние тача, чтобы этот же тап
+     * не превратился в клик по виджетам на экране комнаты. */
+    lv_indev_reset(NULL, nullptr);
+}
+
 namespace // room pages impl
 {
     static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
@@ -532,11 +565,8 @@ namespace // room pages impl
         lv_obj_set_height(w.container, LV_SIZE_CONTENT); // важное место
         lv_obj_set_style_pad_ver(w.container, 8, 0);     // вертикальные отступы
         lv_obj_set_style_pad_hor(w.container, 8, 0);     // горизонтальные отступы
-        lv_obj_set_style_pad_row(w.container, 30, 0);    // вертикальный gap между элементами внутри строки
-
-        // lv_obj_set_style_pad_row(w.container, 12, 0);
+        lv_obj_set_style_pad_row(w.container, 10, 0);    // вертикальный gap между элементами внутри строки
         lv_obj_remove_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
-        // высота авто по содержимому
         lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(
             w.container,
@@ -544,17 +574,17 @@ namespace // room pages impl
             LV_FLEX_ALIGN_CENTER, // вертикаль: центр
             LV_FLEX_ALIGN_CENTER);
 
+        // Заголовок свича
         w.label = lv_label_create(w.container);
         lv_label_set_text(w.label, ent.name.c_str());
         lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
-        lv_obj_set_style_text_font(w.label, &Montserrat_40, 0);
+        lv_obj_set_style_text_font(w.label, &Montserrat_30, 0);
 
-        // Switch control for binary entities (initial state from current value)
+        // Свич
         w.control = lv_switch_create(w.container);
-        // вертикальная ориентация
-        lv_switch_set_orientation(w.control, LV_SWITCH_ORIENTATION_VERTICAL);
-        lv_obj_set_style_width(w.control, 100, LV_PART_MAIN);
-        lv_obj_set_style_height(w.control, 160, LV_PART_MAIN);
+        // lv_switch_set_orientation(w.control, LV_SWITCH_ORIENTATION_VERTICAL);
+        lv_obj_set_style_width(w.control, 160, LV_PART_MAIN);
+        lv_obj_set_style_height(w.control, 90, LV_PART_MAIN);
 
         bool is_on = (ent.state == "on" || ent.state == "ON" ||
                       ent.state == "true" || ent.state == "TRUE" ||
@@ -592,22 +622,25 @@ namespace // room pages impl
             page.area_id = area.id;
             page.area_name = area.name;
 
+            // Лейаут
             page.root = lv_obj_create(NULL);
             lv_obj_set_size(page.root, LV_HOR_RES, LV_VER_RES);
             lv_obj_set_style_bg_color(page.root, lv_color_hex(0x000000), 0);
             lv_obj_set_style_border_width(page.root, 0, 0);
             lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
 
+            // Заголовок страницы
             page.title_label = lv_label_create(page.root);
             lv_label_set_text(page.title_label, page.area_name.c_str());
             lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
-            lv_obj_set_style_text_font(page.title_label, &Montserrat_20, 0);
-            lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 40);
+            lv_obj_set_style_text_font(page.title_label, &Montserrat_40, 0);
+            lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
 
-            // list_container – только он скроллится
+            // Контент
             page.list_container = lv_obj_create(page.root);
             lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(page.list_container, 0, 0);
+            lv_obj_set_style_pad_row(page.list_container, 20, 0);    // вертикальный gap между элементами внутри строки
 
             // занимаем всё под заголовком
             int top = 80; // отступ под title

@@ -76,6 +76,9 @@ const entityStates = {
     'switch.wifi_breaker_t_switch_3': 'OFF',
     'switch.wifi_breaker_t_switch_4': 'OFF',
     'switch.wifi_breaker_t_switch_5': 'OFF',
+    'switch.wifi_breaker_t_switch_6': 'OFF',
+    'switch.wifi_breaker_t_switch_7': 'OFF',
+    'switch.wifi_breaker_t_switch_8': 'OFF',
 };
 
 function toggleState(id) {
@@ -190,11 +193,14 @@ const httpServer = http.createServer((req, res) => {
                 res.end(
                     'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
                     '\n' +
-                    'kukhnia,кухня,switch.wifi_breaker_t_switch_1,Подсветка,off\n' +
-                    'kukhnia,кухня,switch.wifi_breaker_t_switch_2,Розетка,off\n' +
-                    'kukhnia,кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
-                    'kukhnia,кухня,switch.wifi_breaker_t_switch_4,Люстра,off\n' +
-                    'koridor,коридор,switch.wifi_breaker_t_switch_5,Подсветка,off\n'
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,off\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Подсветка,off\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Люстра,off\n' +
+                    'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,off\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_6,Освещение,off\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_7,Люстра,off\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_8,Розетка,off\n'
                 );
             }
         });
