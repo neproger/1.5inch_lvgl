@@ -47,7 +47,7 @@ static constexpr const char *kWeatherUrl = HA_HTTP_BOOTSTRAP_URL;
 static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
 static const char *kWeatherTemplateBody = R"json(
 {
-  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}°C, {{ w.state if w else 'N/A' }}"
+  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}, {{ w.state if w else 'N/A' }}"
 }
 )json";
 
@@ -764,11 +764,11 @@ namespace // room pages impl
 
         if (w.valid)
         {
-            std::snprintf(buf, sizeof(buf), "%.1f°C, %s", w.temperature_c, w.condition.c_str());
+            std::snprintf(buf, sizeof(buf), "%.1fC, %s", w.temperature_c, w.condition.c_str());
         }
         else
         {
-            std::snprintf(buf, sizeof(buf), "--°C, --");
+            std::snprintf(buf, sizeof(buf), "--C, --");
         }
 
         for (auto &page : s_room_pages)
