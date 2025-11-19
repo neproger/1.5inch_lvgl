@@ -70,7 +70,7 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 // Reduce LVGL draw buffer height to save RAM on ESP32
 #define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
-#define EXAMPLE_LCD_SPI_SPEED_MHZ (40)    /* Was 40 MHz; 26 MHz is safer */
+#define EXAMPLE_LCD_SPI_SPEED_MHZ (26)    /* Was 40 MHz; 26 MHz is safer */
 #define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1) /* Limit in-flight DMA transactions */
 #define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL 1
 #define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL
@@ -196,7 +196,7 @@ static esp_err_t app_lvgl_init(void)
         .task_stack = 6144,
         .task_affinity = -1,
         .task_max_sleep_ms = 500,
-        .timer_period_ms = 5,
+        .timer_period_ms = 8,
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port initialization failed");
 

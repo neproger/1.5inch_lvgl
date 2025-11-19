@@ -85,6 +85,8 @@ static void on_weather_updated_from_http(void);
 static void ui_build_screensaver(void);
 static void idle_timer_cb(lv_timer_t *timer);
 static void screensaver_input_cb(lv_event_t *e);
+static void root_gesture_cb(lv_event_t *e);
+static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type);
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
@@ -163,23 +165,11 @@ extern "C" void LVGL_knob_event(void *event)
 
     switch (ev)
     {
-    case 0:
-        if (!s_room_pages.empty())
-        {
-            int rooms = static_cast<int>(s_room_pages.size());
-            s_current_room_index = (s_current_room_index + 1) % rooms;
-            s_current_device_index = 0;
-            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
-        }
+    case 0: // next room
+        ui_load_room_screen(s_current_room_index + 1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
         break;
-    case 1:
-        if (!s_room_pages.empty())
-        {
-            int rooms = static_cast<int>(s_room_pages.size());
-            s_current_room_index = (s_current_room_index - 1 + rooms) % rooms;
-            s_current_device_index = 0;
-            lv_disp_load_scr(s_room_pages[s_current_room_index].root);
-        }
+    case 1: // previous room
+        ui_load_room_screen(s_current_room_index - 1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
         break;
     default:
         break;
@@ -551,6 +541,62 @@ static void screensaver_input_cb(lv_event_t *e)
     lv_indev_reset(NULL, nullptr);
 }
 
+static void root_gesture_cb(lv_event_t *e)
+{
+    if (s_ui_mode != UiMode::Rooms)
+    {
+        return;
+    }
+
+    lv_indev_t *indev = lv_indev_get_act();
+    if (!indev)
+    {
+        return;
+    }
+
+    lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+    if (dir == LV_DIR_LEFT)
+    {
+        ui_load_room_screen(s_current_room_index + 1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
+    }
+    else if (dir == LV_DIR_RIGHT)
+    {
+        ui_load_room_screen(s_current_room_index - 1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+    }
+}
+
+static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type)
+{
+    if (s_room_pages.empty())
+    {
+        return;
+    }
+
+    int rooms = static_cast<int>(s_room_pages.size());
+    if (rooms <= 0)
+    {
+        return;
+    }
+
+    // normalize index into [0, rooms)
+    int idx = new_index % rooms;
+    if (idx < 0)
+    {
+        idx += rooms;
+    }
+
+    s_current_room_index = idx;
+    s_current_device_index = 0;
+
+    lv_obj_t *scr = s_room_pages[s_current_room_index].root;
+    if (!scr)
+    {
+        return;
+    }
+
+    lv_scr_load_anim(scr, anim_type, 300, 0, false);
+}
+
 namespace // room pages impl
 {
     static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
@@ -628,12 +674,13 @@ namespace // room pages impl
             lv_obj_set_style_bg_color(page.root, lv_color_hex(0x000000), 0);
             lv_obj_set_style_border_width(page.root, 0, 0);
             lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_add_event_cb(page.root, root_gesture_cb, LV_EVENT_GESTURE, nullptr);
 
             // Заголовок страницы
             page.title_label = lv_label_create(page.root);
             lv_label_set_text(page.title_label, page.area_name.c_str());
             lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
-            lv_obj_set_style_text_font(page.title_label, &Montserrat_40, 0);
+            lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
             lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
 
             // Контент
