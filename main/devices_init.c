@@ -251,7 +251,11 @@ static esp_err_t app_lvgl_init(void)
 
 static void knob_event_cb(void *arg, void *data)
 {
+    /* iot_knob callbacks run in esp_timer task context.
+     * Protect LVGL with lvgl_port_lock to avoid races/WDT. */
+    lvgl_port_lock(0);
     LVGL_knob_event(data);
+    lvgl_port_unlock();
 }
 
 static void knob_init(uint32_t encoder_a, uint32_t encoder_b)
@@ -276,7 +280,10 @@ static void knob_init(uint32_t encoder_a, uint32_t encoder_b)
 
 static void button_event_cb(void *arg, void *data)
 {
+    /* Button callbacks also run outside the LVGL task; protect LVGL. */
+    lvgl_port_lock(0);
     LVGL_button_event(data);
+    lvgl_port_unlock();
 }
 
 static void button_init(uint32_t button_num)

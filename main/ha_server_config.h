@@ -4,8 +4,9 @@
 // Override these via build flags or other headers before including if needed.
 
 #ifndef HA_SERVER_HOST
-// Default HA/test broker host/IP
-#define HA_SERVER_HOST "192.168.0.105"
+// Default HA/test broker host/IP //192.168.153.81
+#define HA_SERVER_HOST "192.168.153.81"
+#define HA_SERVER_HOST2 "192.168.0.105"
 #define HA_SERVER_HOST1 "192.168.1.185"
 #endif
 

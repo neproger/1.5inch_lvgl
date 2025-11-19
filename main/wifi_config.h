@@ -14,6 +14,7 @@ typedef struct {
 static const wifi_known_ap_t WIFI_KNOWN_APS[] = {
     { "MERCUSYS_0348", "18188530" },
     { "ITPod", "zxcxzzxc" },
+    {"oneplus8","zxcxzzxc"}
     // { "PhoneHotspot", "hotspot_password" },
 };
 
