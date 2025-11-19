@@ -3,14 +3,17 @@
 // Default MQTT configuration for Home Assistant / Mosquitto
 // Override by defining these before including, or add your own init call.
 
+#include "ha_server_config.h"
+
 #ifndef HA_USE_MQTT
 #define HA_USE_MQTT 1
 #endif
 
 // Example: "mqtt://192.168.1.185:1883" or "mqtts://host:8883"
-
-#define HA_MQTT_URI1 "mqtt://192.168.1.185:1883"
-#define HA_MQTT_URI "mqtt://192.168.0.105:1883"
+// HA_MQTT_URI can be overridden before including this header.
+#ifndef HA_MQTT_URI
+#define HA_MQTT_URI "mqtt://" HA_SERVER_HOST ":" HA_MQTT_PORT
+#endif
 
 // If your broker requires authentication, set these; empty means no auth in URI
 #ifndef HA_MQTT_USERNAME

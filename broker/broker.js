@@ -52,7 +52,7 @@ const BROKER_USERNAME = getStr('BROKER_USERNAME', '');
 const BROKER_PASSWORD = getStr('BROKER_PASSWORD', '');
 const BROKER_LOG_HEX = getBool('BROKER_LOG_HEX', true);
 const BROKER_LOG_MAX_BYTES = Number(getStr('BROKER_LOG_MAX_BYTES', '256'));
-const HTTP_PORT = Number(getStr('HTTP_PORT', '8080'));
+const HTTP_PORT = Number(getStr('HTTP_PORT', '8123'));
 
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
