@@ -18,4 +18,3 @@
 #ifndef HA_MQTT_PORT
 #define HA_MQTT_PORT "1883"
 #endif
-
