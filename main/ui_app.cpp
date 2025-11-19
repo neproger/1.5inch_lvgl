@@ -42,7 +42,7 @@ static lv_obj_t *s_weather_temp_label = NULL;
 static lv_obj_t *s_weather_cond_label = NULL;
 static lv_obj_t *s_weather_icon = NULL;
 static lv_timer_t *s_idle_timer = NULL;
-static const uint32_t kScreensaverTimeoutMs = 5000;
+static const uint32_t kScreensaverTimeoutMs = 10000;
 
 namespace // room pages
 {
@@ -131,6 +131,13 @@ extern "C" void ui_init_screensaver_support(void)
 extern "C" void ui_start_weather_polling(void)
 {
     http_manager::start_weather_polling(&on_weather_updated_from_http);
+}
+
+static void on_weather_updated_from_http(void)
+{
+    lvgl_port_lock(-1);
+    ui_update_weather_label();
+    lvgl_port_unlock();
 }
 
 static const char *knob_event_table[] = {
@@ -503,13 +510,6 @@ static void idle_timer_cb(lv_timer_t *timer)
             s_ui_mode = UiMode::Screensaver;
         }
     }
-}
-
-static void on_weather_updated_from_http(void)
-{
-    lvgl_port_lock(-1);
-    ui_update_weather_label();
-    lvgl_port_unlock();
 }
 
 static void screensaver_input_cb(lv_event_t *e)
