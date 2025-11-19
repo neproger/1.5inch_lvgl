@@ -1,15 +1,9 @@
 /*
-  Local MQTT Test Broker (Aedes)
-  - Listens on plain TCP and logs all published messages to console
-  - Optional username/password auth via .env
-
-  Environment (from .env in this folder):
-    BROKER_HOST=127.0.0.1
-    BROKER_PORT=1884
-    BROKER_USERNAME=   # optional
-    BROKER_PASSWORD=   # optional
-    BROKER_LOG_HEX=true          # log payload as hex (default true)
-    BROKER_LOG_MAX_BYTES=256     # preview length
+  Local MQTT + HTTP Test Server
+  - MQTT broker (Aedes) on BROKER_HOST:BROKER_PORT
+  - HTTP endpoint emulating HA /api/template on BROKER_HOST:HTTP_PORT
+    * For bootstrap template: returns CSV with areas/entities
+    * For weather template (screensaver): returns "Temperature,Condition" CSV
 */
 
 const net = require('net');
@@ -41,14 +35,15 @@ function loadEnvFile(envPath) {
 
 loadEnvFile(path.join(__dirname, '.env'));
 
-function getBool(name, def) {
+function getBool(name, defVal) {
     const v = process.env[name];
-    if (v == null) return def;
+    if (v == null) return defVal;
     return /^(1|true|yes|on)$/i.test(String(v).trim());
 }
-function getStr(name, def) {
+
+function getStr(name, defVal) {
     const v = process.env[name];
-    return v == null || v === '' ? def : v;
+    return v == null || v === '' ? defVal : v;
 }
 
 const BROKER_HOST = getStr('BROKER_HOST', '0.0.0.0');
@@ -62,7 +57,6 @@ const HTTP_PORT = Number(getStr('HTTP_PORT', '8080'));
 // Optional auth
 if (BROKER_USERNAME || BROKER_PASSWORD) {
     aedes.authenticate = (client, username, password, done) => {
-        console.log("Authenticate: ", username, password)
         const pwd = password ? password.toString('utf8') : '';
         const ok = username === BROKER_USERNAME && pwd === BROKER_PASSWORD;
         if (!ok) return done(new Error('Auth failed'), false);
@@ -72,10 +66,10 @@ if (BROKER_USERNAME || BROKER_PASSWORD) {
 
 function preview(buf) {
     const b = buf.length > BROKER_LOG_MAX_BYTES ? buf.slice(0, BROKER_LOG_MAX_BYTES) : buf;
-    return BROKER_LOG_HEX ? b.toString('hex') : b.toString('utf8');
+    return BROKER_LOG_HEX ? b.toString('hex') : buf.toString('utf8');
 }
 
-// Простое хранилище состояний наших двух тестовых свитчей
+// Simple in‑memory entity states used by MQTT emulation
 const entityStates = {
     'switch.wifi_breaker_t_switch_1': 'OFF',
     'switch.wifi_breaker_t_switch_2': 'OFF',
@@ -93,23 +87,33 @@ function toggleState(id) {
 
 // Logging hooks
 aedes.on('clientReady', (client) => {
-    console.log(`[broker] client connected id=${client ? client.id : '?'} addr=${client && client.conn ? client.conn.remoteAddress : '?'}:`);
+    console.log('[broker] client connected', {
+        id: client ? client.id : '?',
+        addr: client && client.conn ? client.conn.remoteAddress : '?',
+    });
 });
+
 aedes.on('clientDisconnect', (client) => {
-    console.log(`[broker] client disconnected id=${client ? client.id : '?'}:`);
+    console.log('[broker] client disconnected', { id: client ? client.id : '?' });
 });
+
 aedes.on('clientError', (client, err) => {
-    console.warn(`[broker] client error id=${client ? client.id : '?'}: ${err && err.message}`);
+    console.warn('[broker] client error', {
+        id: client ? client.id : '?',
+        error: err && err.message,
+    });
 });
+
 aedes.on('subscribe', (subs, client) => {
     const topics = subs.map((s) => `${s.topic}(q${s.qos})`).join(', ');
-    console.log(`[broker] subscribe id=${client ? client.id : '?'} -> ${topics}`);
+    console.log('[broker] subscribe', { id: client ? client.id : '?', topics });
 });
+
 aedes.on('unsubscribe', (subs, client) => {
-    console.log(`[broker] unsubscribe id=${client ? client.id : '?'} -> ${subs.join(', ')}`);
+    console.log('[broker] unsubscribe', { id: client ? client.id : '?', topics: subs });
 });
+
 aedes.on('publish', (packet, client) => {
-    // Skip $SYS noise
     if (!packet || !packet.topic || packet.topic.startsWith('$SYS')) return;
 
     const from = client ? `id=${client.id}` : 'broker';
@@ -118,25 +122,25 @@ aedes.on('publish', (packet, client) => {
         : Buffer.alloc(0);
     const pl = preview(plBuf);
 
-    console.log(`[broker] publish ${from} -> topic=${packet.topic} qos=${packet.qos} retain=${packet.retain} bytes=${plBuf.length} :: ${pl}`);
+    console.log('[broker] publish', {
+        from,
+        topic: packet.topic,
+        qos: packet.qos,
+        retain: packet.retain,
+        bytes: plBuf.length,
+        payload: pl,
+    });
 
-    // --- ЛОГИКА ТЕСТОВЫХ СВИТЧЕЙ ---
-
-    // Реагируем только на команды от клиента, а не на собственные публикации брокера
-     if (client && packet.topic === 'ha/cmd/toggle') {
+    // Handle toggle command from device: topic "ha/cmd/toggle", payload = entity_id
+    if (client && packet.topic === 'ha/cmd/toggle') {
         const entityId = plBuf.toString('utf8').trim();
-        // console.log(`[logic] toggle requested for "${entityId}"`);
-
-        // если такой entity отслеживается – переключаем его самого
         if (entityStates[entityId] !== undefined) {
             const prev = entityStates[entityId];
-            const newState = toggleState(entityId);
+            const next = toggleState(entityId);
             const stateTopic = `ha/state/${entityId}`;
-            const statePayload = Buffer.from(newState, 'utf8');
+            const statePayload = Buffer.from(next, 'utf8');
 
-            // console.log(
-            //     `[logic] ${entityId}: ${prev} -> ${newState}, publishing to ${stateTopic}`
-            // );
+            console.log('[logic] toggle', { entityId, prev, next, stateTopic });
 
             aedes.publish({
                 topic: stateTopic,
@@ -148,9 +152,14 @@ aedes.on('publish', (packet, client) => {
     }
 });
 
+// MQTT TCP server
 const server = net.createServer(aedes.handle);
 server.listen(BROKER_PORT, BROKER_HOST, () => {
-    console.log('[broker] listening', { BROKER_HOST, BROKER_PORT, auth: !!(BROKER_USERNAME || BROKER_PASSWORD) });
+    console.log('[broker] listening', {
+        host: BROKER_HOST,
+        port: BROKER_PORT,
+        auth: !!(BROKER_USERNAME || BROKER_PASSWORD),
+    });
 });
 
 // Simple HTTP endpoint emulating HA /api/template
@@ -165,17 +174,29 @@ const httpServer = http.createServer((req, res) => {
             }
         });
         req.on('end', () => {
+            const isWeatherTemplate = body.includes('Temperature,Condition');
             res.statusCode = 200;
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.end(
-                'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
-                '\n' +
-                'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,off\n' +
-                'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Розетка,off\n' +
-                'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
-                'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Розетка,off\n' +
-                'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,off\n'
-            );
+
+            if (isWeatherTemplate) {
+                // Response for weather template used by screensaver
+                // Matches expected CSV header + single data line
+                res.end(
+                    'Temperature,Condition\n' +
+                    '13.5°C, clear-night\n'
+                );
+            } else {
+                // Default bootstrap CSV with areas/entities
+                res.end(
+                    'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
+                    '\n' +
+                    'kukhnia,кухня,switch.wifi_breaker_t_switch_1,Подсветка,off\n' +
+                    'kukhnia,кухня,switch.wifi_breaker_t_switch_2,Розетка,off\n' +
+                    'kukhnia,кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
+                    'kukhnia,кухня,switch.wifi_breaker_t_switch_4,Люстра,off\n' +
+                    'koridor,коридор,switch.wifi_breaker_t_switch_5,Подсветка,off\n'
+                );
+            }
         });
         return;
     }
@@ -195,6 +216,7 @@ function shutdown() {
     try { httpServer.close(); } catch (_) { }
     try { aedes.close(() => process.exit(0)); } catch (_) { process.exit(0); }
 }
+
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
