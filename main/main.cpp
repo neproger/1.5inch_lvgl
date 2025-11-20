@@ -28,11 +28,6 @@ extern "C" void app_main(void)
         return;
     }
 
-    devices_set_backlight_raw(0x10);
-vTaskDelay(pdMS_TO_TICKS(2000));
-devices_set_backlight_raw(0xFF);
-
-
     if (!http_manager::bootstrap_state())
     {
         ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, stopping init");
