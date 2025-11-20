@@ -63,28 +63,28 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Hardware configuration ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define EXAMPLE_LCD_HOST (SPI2_HOST)
-#define EXAMPLE_LCD_BITS_PER_PIXEL (16)
-#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)
-#define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)
+#define EXAMPLE_LCD_HOST (SPI2_HOST)                         // SPI‑хост, к которому подключен дисплей
+#define EXAMPLE_LCD_BITS_PER_PIXEL (16)                      // глубина цвета кадра в битах на пиксель
+#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)                     // 1 – двойной буфер LVGL, 0 – один буфер
+#define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)                      // включить режим LVGL для уменьшения «разрыва» кадра (tearing)
 // Reduce LVGL draw buffer height to save RAM on ESP32
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)
+#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)                    // высота буфера отрисовки LVGL в линиях
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
-#define EXAMPLE_LCD_SPI_SPEED_MHZ (26)    /* Was 40 MHz; 26 MHz is safer */
-#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1) /* Limit in-flight DMA transactions */
-#define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL 1
-#define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL
-#define EXAMPLE_PIN_NUM_LCD_CS (GPIO_NUM_12)
-#define EXAMPLE_PIN_NUM_LCD_PCLK (GPIO_NUM_10)
-#define EXAMPLE_PIN_NUM_LCD_DATA0 (GPIO_NUM_13)
-#define EXAMPLE_PIN_NUM_LCD_DATA1 (GPIO_NUM_11)
-#define EXAMPLE_PIN_NUM_LCD_DATA2 (GPIO_NUM_14)
-#define EXAMPLE_PIN_NUM_LCD_DATA3 (GPIO_NUM_9)
-#define EXAMPLE_PIN_NUM_LCD_RST (GPIO_NUM_8)
-#define EXAMPLE_PIN_NUM_BK_LIGHT (GPIO_NUM_17)
+#define EXAMPLE_LCD_SPI_SPEED_MHZ (26)                       // частота SPI к дисплею в МГц (26 МГц стабильнее, чем 40 МГц)
+#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1)                    // максимальное число одновременно висящих SPI‑транзакций
+#define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL 1                      // логический уровень GPIO для включения подсветки
+#define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL // логический уровень для выключения подсветки
+#define EXAMPLE_PIN_NUM_LCD_CS (GPIO_NUM_12)                 // GPIO для линии CS дисплея
+#define EXAMPLE_PIN_NUM_LCD_PCLK (GPIO_NUM_10)               // GPIO для PCLK/SCK дисплея
+#define EXAMPLE_PIN_NUM_LCD_DATA0 (GPIO_NUM_13)              // основной MOSI / D0 линии данных дисплея
+#define EXAMPLE_PIN_NUM_LCD_DATA1 (GPIO_NUM_11)              // доп. линия данных D1 (QSPI)
+#define EXAMPLE_PIN_NUM_LCD_DATA2 (GPIO_NUM_14)              // доп. линия данных D2 (QSPI)
+#define EXAMPLE_PIN_NUM_LCD_DATA3 (GPIO_NUM_9)               // доп. линия данных D3 (QSPI)
+#define EXAMPLE_PIN_NUM_LCD_RST (GPIO_NUM_8)                 // GPIO для сигнала сброса дисплея
+#define EXAMPLE_PIN_NUM_BK_LIGHT (GPIO_NUM_17)               // GPIO управления подсветкой (через LEDC/PWM)
 
-#define EXAMPLE_LCD_H_RES 478
-#define EXAMPLE_LCD_V_RES 466
+#define EXAMPLE_LCD_H_RES 478                                // горизонтальное разрешение дисплея, пикселей
+#define EXAMPLE_LCD_V_RES 466                                // вертикальное разрешение дисплея, пикселей
 
 #if CONFIG_LV_COLOR_DEPTH == 32
 #define LCD_BIT_PER_PIXEL (24)
@@ -93,22 +93,22 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 #endif
 
 /* Touch */
-#define EXAMPLE_TOUCH_HOST (I2C_NUM_0)
-#define EXAMPLE_TOUCH_I2C_NUM (0)
-#define EXAMPLE_TOUCH_I2C_CLK_HZ (100000) /* Lower speed for stability */
-#define EXAMPLE_PIN_NUM_TOUCH_SCL (GPIO_NUM_3)
-#define EXAMPLE_PIN_NUM_TOUCH_SDA (GPIO_NUM_1)
-#define EXAMPLE_PIN_NUM_TOUCH_RST (GPIO_NUM_2)
-#define EXAMPLE_PIN_NUM_TOUCH_INT (GPIO_NUM_4)
+#define EXAMPLE_TOUCH_HOST (I2C_NUM_0)                       // I2C‑хост, к которому подключен тач‑контроллер
+#define EXAMPLE_TOUCH_I2C_NUM (0)                            // номер I2C‑порта в драйвере ESP‑IDF
+#define EXAMPLE_TOUCH_I2C_CLK_HZ (100000)                    // частота шины I2C для тачскрина (понижена для стабильности)
+#define EXAMPLE_PIN_NUM_TOUCH_SCL (GPIO_NUM_3)               // GPIO линии SCL тач‑контроллера
+#define EXAMPLE_PIN_NUM_TOUCH_SDA (GPIO_NUM_1)               // GPIO линии SDA тач‑контроллера
+#define EXAMPLE_PIN_NUM_TOUCH_RST (GPIO_NUM_2)               // GPIO сброса тач‑контроллера
+#define EXAMPLE_PIN_NUM_TOUCH_INT (GPIO_NUM_4)               // GPIO прерывания INT от тач‑контроллера
 
 /* Inputs */
 typedef enum
 {
-    BSP_BTN_PRESS = GPIO_NUM_0,
+    BSP_BTN_PRESS = GPIO_NUM_0, // пользовательская кнопка (BOOT)
 } bsp_button_t;
 
-#define BSP_ENCODER_A (GPIO_NUM_6)
-#define BSP_ENCODER_B (GPIO_NUM_5)
+#define BSP_ENCODER_A (GPIO_NUM_6) // фаза A энкодера
+#define BSP_ENCODER_B (GPIO_NUM_5) // фаза B энкодера
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Panel vendor init commands (SH8601) //////////////////////////////////////////////////////////////
@@ -118,8 +118,8 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xC4, (uint8_t[]){0x80}, 1, 0},
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 0, 10},
-    {0x53, (uint8_t[]){0x20}, 1, 10},
-    {0x51, (uint8_t[]){0xFF}, 1, 10},
+    {0x53, (uint8_t[]){0x20}, 1, 10}, // включить управление яркостью (BL ctrl)
+    {0x51, (uint8_t[]){0xFF}, 1, 10}, // яркость = 0xFF (максимум) при старте
     {0x63, (uint8_t[]){0xFF}, 1, 10},
     /* Address window: revert to vendor defaults used previously
      * Columns: start=6, end=477  (0x0006 .. 0x01DD) -> width 472
@@ -339,7 +339,7 @@ esp_err_t devices_init(void)
         };
         ESP_ERROR_CHECK(ledc_channel_config(&ccfg));
         // Set initial brightness to 100%
-        ESP_ERROR_CHECK(ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, 255));
+        ESP_ERROR_CHECK(ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, 230));
         ESP_ERROR_CHECK(ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel));
         s_bk_ledc_inited = true;
     }
@@ -401,7 +401,10 @@ esp_err_t devices_init(void)
 // --- Backlight control ---
 esp_err_t devices_set_backlight_raw(uint8_t level)
 {
-    // Prefer PWM via LEDC; fall back to DCS 0x51 if LEDC not available
+    // ESP_LOGI("BL", "raw level=%u, ledc_inited=%d", level, (int)s_bk_ledc_inited);
+
+    esp_err_t ledc_err = ESP_OK;
+    // Try PWM via LEDC if configured
     if (s_bk_ledc_inited)
     {
         uint32_t duty = level; // 0..255
@@ -412,16 +415,25 @@ esp_err_t devices_set_backlight_raw(uint8_t level)
         }
         esp_err_t e1 = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, duty);
         esp_err_t e2 = ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
-        return (e1 != ESP_OK) ? e1 : e2;
+        ESP_LOGI("BL", "ledc_set_duty err=%d", e1);
+        ESP_LOGI("BL", "ledc_update_duty err=%d", e2);
+        ledc_err = (e1 != ESP_OK) ? e1 : e2;
     }
+
+    // Always also send SH8601 DCS brightness, since many boards wire backlight only there
     if (lcd_io == NULL)
-        return ESP_ERR_INVALID_STATE;
-    // SH8601 DCS brightness
-    esp_err_t err;
+        return ledc_err ? ledc_err : ESP_ERR_INVALID_STATE;
+
+    esp_err_t dcs_err;
     lvgl_port_lock(-1);
-    err = esp_lcd_panel_io_tx_param(lcd_io, 0x51, &level, 1);
+    dcs_err = esp_lcd_panel_io_tx_param(lcd_io, 0x51, &level, 1);
+    
     lvgl_port_unlock();
-    return err;
+
+    // Prefer reporting DCS error, otherwise LEDC error, otherwise OK
+    if (dcs_err != ESP_OK)
+        return dcs_err;
+    return ledc_err;
 }
 
 esp_err_t devices_set_backlight_percent(int percent)

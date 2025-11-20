@@ -23,14 +23,19 @@ extern "C" void app_main(void)
         return;
     }
 
-    if (!http_manager::bootstrap_state())
+    if (devices_init() != ESP_OK)
     {
-        ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, stopping init");
         return;
     }
 
-    if (devices_init() != ESP_OK)
+    devices_set_backlight_raw(0x10);
+vTaskDelay(pdMS_TO_TICKS(2000));
+devices_set_backlight_raw(0xFF);
+
+
+    if (!http_manager::bootstrap_state())
     {
+        ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, stopping init");
         return;
     }
 

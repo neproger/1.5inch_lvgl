@@ -91,8 +91,6 @@ void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
     s_last_input_us = esp_timer_get_time();
-    ui_build_room_pages();
-
     // стартовый экран и стартовый элемент
     if (!s_room_pages.empty())
     {
@@ -100,6 +98,7 @@ void ui_app_init(void)
         s_current_device_index = 0;
         lv_disp_load_scr(s_room_pages[0].root);
     }
+    ui_build_room_pages();
 
     // 3. Таймер для UI — оставляем твой код
     {
@@ -506,6 +505,7 @@ static void idle_timer_cb(lv_timer_t *timer)
     {
         if (inactive_ms >= kScreensaverTimeoutMs && s_screensaver_root)
         {
+            
             lv_disp_load_scr(s_screensaver_root);
             s_ui_mode = UiMode::Screensaver;
         }
