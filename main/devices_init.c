@@ -119,7 +119,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 0, 10},
     {0x53, (uint8_t[]){0x20}, 1, 10}, // включить управление яркостью (BL ctrl)
-    {0x51, (uint8_t[]){0xFF}, 1, 10}, // яркость = 0xFF (максимум) при старте
+    {0x51, (uint8_t[]){0xA0}, 1, 10}, // яркость = 0xFF (максимум) при старте
     {0x63, (uint8_t[]){0xFF}, 1, 10},
     /* Address window: revert to vendor defaults used previously
      * Columns: start=6, end=477  (0x0006 .. 0x01DD) -> width 472
@@ -319,23 +319,23 @@ esp_err_t devices_init(void)
     {
         // Configure LEDC for PWM backlight control
         ledc_timer_config_t tcfg = {
-            .speed_mode = s_bk_ledc_mode,
-            .duty_resolution = LEDC_TIMER_8_BIT, // 0..255
-            .timer_num = s_bk_ledc_timer,
-            .freq_hz = 5000,
-            .clk_cfg = LEDC_AUTO_CLK,
+            .speed_mode = s_bk_ledc_mode,        // низкоскоростной таймер (LEDC_LOW_SPEED_MODE)
+            .duty_resolution = LEDC_TIMER_8_BIT, // разрядность ШИМ 8 бит: счётчик 0..255
+            .timer_num = s_bk_ledc_timer,        // номер таймера LEDC (LEDC_TIMER_0)
+            .freq_hz = 5000,                     // частота ШИМ подсветки 5 кГц
+            .clk_cfg = LEDC_AUTO_CLK,            // автоматический выбор источника тактирования
         };
         ESP_ERROR_CHECK(ledc_timer_config(&tcfg));
 
         ledc_channel_config_t ccfg = {
-            .gpio_num = EXAMPLE_PIN_NUM_BK_LIGHT,
-            .speed_mode = s_bk_ledc_mode,
-            .channel = s_bk_ledc_channel,
-            .intr_type = LEDC_INTR_DISABLE,
-            .timer_sel = s_bk_ledc_timer,
-            .duty = 0,
-            .hpoint = 0,
-            .flags.output_invert = 0,
+            .gpio_num = EXAMPLE_PIN_NUM_BK_LIGHT, // GPIO, к которому подключена подсветка
+            .speed_mode = s_bk_ledc_mode,         // тот же режим, что и у таймера
+            .channel = s_bk_ledc_channel,         // используемый канал LEDC (LEDC_CHANNEL_0)
+            .intr_type = LEDC_INTR_DISABLE,       // прерывания LEDC не используются
+            .timer_sel = s_bk_ledc_timer,         // какой таймер LEDC обслуживает канал
+            .duty = 0,                            // стартовый duty (подсветка выключена)
+            .hpoint = 0,                          // начало импульса в начале периода
+            .flags.output_invert = 0,             // не инвертировать выход (активный высокий уровень)
         };
         ESP_ERROR_CHECK(ledc_channel_config(&ccfg));
         // Set initial brightness to 100%
