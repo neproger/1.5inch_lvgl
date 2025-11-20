@@ -2,6 +2,7 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -107,7 +108,16 @@ namespace http_manager
             s.assign(s.begin() + static_cast<long>(start), s.begin() + static_cast<long>(end));
         }
 
-        static bool parse_weather_csv(const char *csv, float &out_temp, std::string &out_cond)
+        static bool parse_weather_csv(const char *csv,
+                                      float &out_temp,
+                                      std::string &out_cond,
+                                      int &out_year,
+                                      int &out_month,
+                                      int &out_day,
+                                      int &out_weekday,
+                                      int &out_hour,
+                                      int &out_minute,
+                                      int &out_second)
         {
             if (!csv)
                 return false;
@@ -145,12 +155,29 @@ namespace http_manager
             if (data_line.empty())
                 return false;
 
-            size_t comma = data_line.find(',');
-            if (comma == std::string::npos)
+            // Expect CSV: Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second
+            std::string fields[9];
+            size_t field_idx = 0;
+            size_t start = 0;
+            for (size_t i = 0; i <= data_line.size(); ++i)
+            {
+                bool at_end = (i == data_line.size());
+                if (at_end || data_line[i] == ',')
+                {
+                    if (field_idx >= 9)
+                        break;
+                    std::string f = data_line.substr(start, i - start);
+                    trim_ws(f);
+                    fields[field_idx++] = std::move(f);
+                    start = i + 1;
+                }
+            }
+
+            if (field_idx < 2)
                 return false;
 
-            std::string temp_str = data_line.substr(0, comma);
-            std::string cond_str = data_line.substr(comma + 1);
+            std::string temp_str = fields[0];
+            std::string cond_str = fields[1];
             trim_ws(temp_str);
             trim_ws(cond_str);
 
@@ -164,6 +191,25 @@ namespace http_manager
 
             out_temp = temp;
             out_cond = std::move(cond_str);
+
+            auto parse_int_default = [](const std::string &s, int def) -> int {
+                if (s.empty())
+                    return def;
+                char *endp_local = nullptr;
+                long v = std::strtol(s.c_str(), &endp_local, 10);
+                if (endp_local == s.c_str())
+                    return def;
+                return static_cast<int>(v);
+            };
+
+            out_year = (field_idx > 2) ? parse_int_default(fields[2], 0) : 0;
+            out_month = (field_idx > 3) ? parse_int_default(fields[3], 0) : 0;
+            out_day = (field_idx > 4) ? parse_int_default(fields[4], 0) : 0;
+            out_weekday = (field_idx > 5) ? parse_int_default(fields[5], 0) : 0;
+            out_hour = (field_idx > 6) ? parse_int_default(fields[6], 0) : 0;
+            out_minute = (field_idx > 7) ? parse_int_default(fields[7], 0) : 0;
+            out_second = (field_idx > 8) ? parse_int_default(fields[8], 0) : 0;
+
             return true;
         }
 
@@ -195,13 +241,21 @@ namespace http_manager
 
                 float temp_c = 0.0f;
                 std::string cond;
-                if (!parse_weather_csv(buf, temp_c, cond))
+                int year = 0;
+                int month = 0;
+                int day = 0;
+                int weekday = 0;
+                int hour = 0;
+                int minute = 0;
+                int second = 0;
+                if (!parse_weather_csv(buf, temp_c, cond, year, month, day, weekday, hour, minute, second))
                 {
                     ESP_LOGW(TAG, "Failed to parse weather CSV");
                     continue;
                 }
 
                 state::set_weather(temp_c, cond);
+                state::set_clock(year, month, day, weekday, hour, minute, second, esp_timer_get_time());
 
                 if (s_weather_cb)
                 {
@@ -243,4 +297,3 @@ namespace http_manager
     }
 
 } // namespace http_manager
-

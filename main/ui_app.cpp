@@ -42,6 +42,11 @@ static lv_obj_t *s_weather_temp_label = NULL;
 static lv_obj_t *s_weather_cond_label = NULL;
 static lv_obj_t *s_weather_icon = NULL;
 static lv_timer_t *s_idle_timer = NULL;
+static lv_obj_t *s_time_label = NULL;
+static lv_obj_t *s_date_label = NULL;
+static lv_obj_t *s_week_day_label = NULL;
+
+static lv_timer_t *s_clock_timer = NULL;
 static const uint32_t kScreensaverTimeoutMs = 10000;
 
 namespace // room pages
@@ -87,6 +92,7 @@ static void idle_timer_cb(lv_timer_t *timer);
 static void screensaver_input_cb(lv_event_t *e);
 static void root_gesture_cb(lv_event_t *e);
 static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type);
+static void clock_timer_cb(lv_timer_t *timer);
 void ui_app_init(void)
 {
     // Время последнего ввода (как у тебя было)
@@ -110,7 +116,8 @@ void ui_app_init(void)
                 s_state_subscriptions.push_back(id);
         }
         // Синхронизируем UI с уже известным состоянием (после bootstrap и MQTT)
-        for (const auto &e : ents) {
+        for (const auto &e : ents)
+        {
             on_state_entity_changed(e);
         }
     }
@@ -124,6 +131,10 @@ extern "C" void ui_init_screensaver_support(void)
     if (s_idle_timer == NULL)
     {
         s_idle_timer = lv_timer_create(idle_timer_cb, 500, NULL);
+    }
+    if (s_clock_timer == NULL)
+    {
+        s_clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     }
 }
 
@@ -466,24 +477,48 @@ static void ui_build_screensaver(void)
     lv_obj_set_style_border_width(s_screensaver_root, 0, 0);
     lv_obj_remove_flag(s_screensaver_root, LV_OBJ_FLAG_SCROLLABLE);
 
+    // Иконка
     s_weather_icon = lv_image_create(s_screensaver_root);
     lv_image_set_src(s_weather_icon, &clear);
     // Recolor icons to white so they are visible on black background
     lv_obj_set_style_img_recolor(s_weather_icon, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_img_recolor_opa(s_weather_icon, LV_OPA_COVER, 0);
-    lv_obj_align(s_weather_icon, LV_ALIGN_CENTER, 0, -120);
+    lv_obj_align(s_weather_icon, LV_ALIGN_CENTER, 0, -140);
 
+    // Температура
     s_weather_temp_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_temp_label, "");
     lv_obj_set_style_text_color(s_weather_temp_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_temp_label, &Montserrat_70, 0);
     lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, 0);
 
+    // Состояние погоды
     s_weather_cond_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_cond_label, "");
     lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_30, 0);
-    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, 80);
+    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, -80);
+
+    // Дата
+    s_date_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_date_label, "");
+    lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_date_label, &Montserrat_40, 0);
+    lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0, -130);
+
+    // День недели
+    s_week_day_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_week_day_label, "");
+    lv_obj_set_style_text_color(s_week_day_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_week_day_label, &Montserrat_40, 0);
+    lv_obj_align(s_week_day_label, LV_ALIGN_BOTTOM_MID, 0, -90);
+
+    // Время
+    s_time_label = lv_label_create(s_screensaver_root);
+    lv_label_set_text(s_time_label, "");
+    lv_obj_set_style_text_color(s_time_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(s_time_label, &Montserrat_40, 0);
+    lv_obj_align(s_time_label, LV_ALIGN_BOTTOM_MID, 0, -16);
 
     // Wake from screensaver on any touch on this screen
     lv_obj_add_event_cb(s_screensaver_root, screensaver_input_cb, LV_EVENT_PRESSED, nullptr);
@@ -505,7 +540,7 @@ static void idle_timer_cb(lv_timer_t *timer)
     {
         if (inactive_ms >= kScreensaverTimeoutMs && s_screensaver_root)
         {
-            
+
             lv_disp_load_scr(s_screensaver_root);
             s_ui_mode = UiMode::Screensaver;
         }
@@ -563,6 +598,15 @@ static void root_gesture_cb(lv_event_t *e)
     {
         ui_load_room_screen(s_current_room_index - 1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
     }
+}
+
+static void clock_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    // Reuse weather label update to also refresh clock
+    lvgl_port_lock(-1);
+    ui_update_weather_label();
+    lvgl_port_unlock();
 }
 
 static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type)
@@ -630,7 +674,7 @@ namespace // room pages impl
         w.control = lv_switch_create(w.container);
         // lv_switch_set_orientation(w.control, LV_SWITCH_ORIENTATION_VERTICAL);
         lv_obj_set_style_width(w.control, 160, LV_PART_MAIN);
-        lv_obj_set_style_height(w.control, 90, LV_PART_MAIN);
+        lv_obj_set_style_height(w.control, 70, LV_PART_MAIN);
 
         bool is_on = (ent.state == "on" || ent.state == "ON" ||
                       ent.state == "true" || ent.state == "TRUE" ||
@@ -687,7 +731,7 @@ namespace // room pages impl
             page.list_container = lv_obj_create(page.root);
             lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(page.list_container, 0, 0);
-            lv_obj_set_style_pad_row(page.list_container, 20, 0);    // вертикальный gap между элементами внутри строки
+            lv_obj_set_style_pad_row(page.list_container, 20, 0); // вертикальный gap между элементами внутри строки
 
             // занимаем всё под заголовком
             int top = 80; // отступ под title
@@ -862,6 +906,74 @@ namespace // room pages impl
         if (s_weather_icon && icon)
         {
             lv_image_set_src(s_weather_icon, icon);
+        }
+
+        // Update clock label based on ClockState
+        state::ClockState c = state::clock();
+        if (c.valid)
+        {
+            int64_t now_us = esp_timer_get_time();
+            int64_t delta_sec = 0;
+            if (now_us > c.sync_monotonic_us)
+            {
+                delta_sec = (now_us - c.sync_monotonic_us) / 1000000;
+            }
+            int64_t total_sec = c.base_seconds + delta_sec;
+            if (total_sec < 0)
+                total_sec = 0;
+            int64_t sec_of_day = total_sec % 86400;
+            int hour = static_cast<int>(sec_of_day / 3600);
+            int minute = static_cast<int>((sec_of_day / 60) % 60);
+            int second = static_cast<int>(sec_of_day % 60);
+
+            static const char *kWeekdayNames[7] = {
+                "Понедельник",
+                "Вторник",
+                "Среда",
+                "Четверг",
+                "Пятница",
+                "Суббота",
+                "Воскресенье"};
+
+            static const char *kMonthNames[13] = {
+                "",
+                "Январь",
+                "Февраль",
+                "Март",
+                "Апрель",
+                "Май",
+                "Июнь",
+                "Июль",
+                "Август",
+                "Сентябрь",
+                "Октябрь",
+                "Ноябрь",
+                "Декабрь"};
+
+            int weekday = c.weekday;
+            if (weekday < 0 || weekday > 6)
+                weekday = 0;
+
+            int month = c.month;
+            if (month < 1 || month > 12)
+                month = 1;
+
+            int day = c.day;
+            if (day < 1)
+                day = 1;
+
+            char time_buf[32];
+            char date_buf[32];
+
+            std::snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d", hour, minute, second);
+            std::snprintf(date_buf, sizeof(date_buf), "%s, %d", kMonthNames[month], day); // формат "Январь, 8"
+
+            if (s_time_label)
+                lv_label_set_text(s_time_label, time_buf);
+            if (s_date_label)
+                lv_label_set_text(s_date_label, date_buf);
+            if (s_week_day_label)
+                lv_label_set_text(s_week_day_label, kWeekdayNames[weekday]);
         }
     }
 

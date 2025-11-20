@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <cstdint>
 
 namespace state
 {
@@ -29,6 +30,17 @@ namespace state
         bool valid = false;
     };
 
+    struct ClockState
+    {
+        int year = 0;
+        int month = 0;
+        int day = 0;
+        int weekday = 0;             // 0=Monday..6=Sunday (follow Python weekday())
+        std::int64_t base_seconds = 0;      // seconds since start of day at sync time
+        std::int64_t sync_monotonic_us = 0; // esp_timer_get_time() at sync time
+        bool valid = false;
+    };
+
     using EntityListener = std::function<void(const Entity &)>;
 
     // Parse initial state from CSV (bootstrap HTTP response).
@@ -46,6 +58,17 @@ namespace state
     // Weather state
     void set_weather(float temperature_c, const std::string &condition);
     WeatherState weather();
+
+    // Clock state (time/date synced from HA)
+    void set_clock(int year,
+                   int month,
+                   int day,
+                   int weekday,
+                   int hour,
+                   int minute,
+                   int second,
+                   std::int64_t monotonic_us);
+    ClockState clock();
 
     // UI subscriptions
     int subscribe_entity(const std::string &id, EntityListener cb);

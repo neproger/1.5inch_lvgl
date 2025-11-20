@@ -182,25 +182,33 @@ const httpServer = http.createServer((req, res) => {
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
             if (isWeatherTemplate) {
-                // Response for weather template used by screensaver
-                // Matches expected CSV header + single data line
+                const now = new Date();
+
+                const year = now.getFullYear();
+                const month = now.getMonth() + 1;      // 0–11 → +1
+                const day = now.getDate();
+                const weekday = now.getDay();           // 0–6 (вс → сб)
+                const hour = String(now.getHours()).padStart(2, '0');
+                const minute = String(now.getMinutes()).padStart(2, '0');
+                const second = String(now.getSeconds()).padStart(2, '0');
+
                 res.end(
-                    'Temperature,Condition\n' +
-                    '13.5°C, sunny\n' //clear-night
+                    'Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second\n' +
+                    `14.2,cloudy,${year},${month},${day},${weekday},${hour},${minute},${second}\n`
                 );
             } else {
                 // Default bootstrap CSV with areas/entities
                 res.end(
                     'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
                     '\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,off\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Подсветка,off\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,off\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Люстра,off\n' +
-                    'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,off\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_6,Освещение,off\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_7,Люстра,off\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_8,Розетка,off\n'
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,on\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Подсветка,on\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,on\n' +
+                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Люстра,on\n' +
+                    'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,on\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_6,Освещение,on\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_7,Люстра,on\n' +
+                    'spalnia,Спальня,switch.wifi_breaker_t_switch_8,Розетка,on\n'
                 );
             }
         });

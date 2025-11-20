@@ -21,6 +21,7 @@ namespace state
         std::unordered_map<std::string, size_t> g_area_index_by_id;
         std::unordered_map<std::string, size_t> g_entity_index_by_id;
         WeatherState g_weather;
+        ClockState g_clock;
 
         struct ListenerEntry
         {
@@ -307,6 +308,48 @@ namespace state
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_weather;
+    }
+
+    void set_clock(int year,
+                   int month,
+                   int day,
+                   int weekday,
+                   int hour,
+                   int minute,
+                   int second,
+                   std::int64_t monotonic_us)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+
+        // Basic range clamping
+        if (hour < 0)
+            hour = 0;
+        if (hour > 23)
+            hour = 23;
+        if (minute < 0)
+            minute = 0;
+        if (minute > 59)
+            minute = 59;
+        if (second < 0)
+            second = 0;
+        if (second > 59)
+            second = 59;
+
+        g_clock.year = year;
+        g_clock.month = month;
+        g_clock.day = day;
+        g_clock.weekday = weekday;
+        g_clock.base_seconds = static_cast<std::int64_t>(hour) * 3600 +
+                               static_cast<std::int64_t>(minute) * 60 +
+                               static_cast<std::int64_t>(second);
+        g_clock.sync_monotonic_us = monotonic_us;
+        g_clock.valid = true;
+    }
+
+    ClockState clock()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_clock;
     }
 
     int subscribe_entity(const std::string &id, EntityListener cb)
