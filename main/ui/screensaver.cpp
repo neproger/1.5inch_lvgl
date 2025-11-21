@@ -19,7 +19,15 @@ namespace ui
         lv_obj_t *s_date_label = nullptr;
         lv_obj_t *s_week_day_label = nullptr;
 
+        static lv_timer_t *s_idle_timer = nullptr;
+        static lv_timer_t *s_clock_timer = nullptr;
+        static bool s_active = false;
+        static const uint32_t kScreensaverTimeoutMs = 10000;
+
         static void on_weather_updated_from_http(void);
+        static void idle_timer_cb(lv_timer_t *timer);
+        static void screensaver_input_cb(lv_event_t *e);
+        static void clock_timer_cb(lv_timer_t *timer);
 
         void ui_build_screensaver()
         {
@@ -71,6 +79,31 @@ namespace ui
             lv_obj_align(s_time_label, LV_ALIGN_CENTER, 0, 20);
         }
 
+        void init_support()
+        {
+            ui_build_screensaver();
+            ui_update_weather_and_clock();
+
+            if (s_idle_timer == nullptr)
+            {
+                s_idle_timer = lv_timer_create(idle_timer_cb, 500, nullptr);
+            }
+            if (s_clock_timer == nullptr)
+            {
+                s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
+            }
+
+            if (s_screensaver_root)
+            {
+                lv_obj_add_event_cb(s_screensaver_root, screensaver_input_cb, LV_EVENT_PRESSED, nullptr);
+            }
+        }
+
+        bool is_active()
+        {
+            return s_active;
+        }
+
         void show()
         {
             if (!s_screensaver_root)
@@ -80,6 +113,7 @@ namespace ui
             if (s_screensaver_root)
             {
                 lv_disp_load_scr(s_screensaver_root);
+                s_active = true;
             }
         }
 
@@ -88,6 +122,7 @@ namespace ui
             if (room_root)
             {
                 lv_disp_load_scr(room_root);
+                s_active = false;
             }
         }
 
@@ -291,6 +326,65 @@ namespace ui
 
         static void on_weather_updated_from_http(void)
         {
+            lvgl_port_lock(-1);
+            ui_update_weather_and_clock();
+            lvgl_port_unlock();
+        }
+
+        static void idle_timer_cb(lv_timer_t *timer)
+        {
+            (void)timer;
+
+            lv_display_t *disp = lv_display_get_default();
+            if (!disp)
+            {
+                return;
+            }
+
+            uint32_t inactive_ms = lv_display_get_inactive_time(disp);
+
+            if (!s_active)
+            {
+                if (inactive_ms >= kScreensaverTimeoutMs)
+                {
+                    show();
+                }
+            }
+        }
+
+        static void screensaver_input_cb(lv_event_t *e)
+        {
+            if (!s_active)
+            {
+                return;
+            }
+
+            lv_event_code_t code = lv_event_get_code(e);
+            if (code != LV_EVENT_PRESSED)
+            {
+                return;
+            }
+
+            if (!rooms::s_room_pages.empty())
+            {
+                int rooms = static_cast<int>(rooms::s_room_pages.size());
+                if (rooms > 0)
+                {
+                    if (rooms::s_current_room_index < 0 || rooms::s_current_room_index >= rooms)
+                    {
+                        rooms::s_current_room_index = 0;
+                    }
+                    hide_to_room(rooms::s_room_pages[rooms::s_current_room_index].root);
+                }
+            }
+
+            lv_indev_reset(NULL, nullptr);
+        }
+
+        static void clock_timer_cb(lv_timer_t *timer)
+        {
+            (void)timer;
+
             lvgl_port_lock(-1);
             ui_update_weather_and_clock();
             lvgl_port_unlock();

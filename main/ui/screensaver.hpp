@@ -19,11 +19,17 @@ namespace ui
 
         void ui_build_screensaver();
 
+        // Initialize screensaver timers and input handling
+        void init_support();
+
         // Update weather info on both room pages and screensaver
         void ui_update_weather_and_clock();
 
         // Start periodic weather HTTP polling and update UI on changes
         void start_weather_polling();
+
+        // Whether screensaver is currently active
+        bool is_active();
 
         void show();
         void hide_to_room(lv_obj_t *room_root);

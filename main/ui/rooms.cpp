@@ -6,6 +6,8 @@
 #include "fonts.h"
 #include "icons.h"
 #include "state_manager.hpp"
+#include "switch.hpp"
+#include "screensaver.hpp"
 
 #include <cstdio>
 
@@ -125,6 +127,164 @@ namespace ui
 
                 s_room_pages.push_back(std::move(page));
             }
+        }
+
+        void show_initial_room()
+        {
+            if (s_room_pages.empty())
+            {
+                return;
+            }
+
+            s_current_room_index = 0;
+            s_current_device_index = 0;
+            lv_disp_load_scr(s_room_pages[0].root);
+        }
+
+        void show_room_relative(int delta, lv_screen_load_anim_t anim_type)
+        {
+            if (s_room_pages.empty())
+            {
+                return;
+            }
+
+            int rooms = static_cast<int>(s_room_pages.size());
+            if (rooms <= 0)
+            {
+                return;
+            }
+
+            int new_index = s_current_room_index + delta;
+            int idx = new_index % rooms;
+            if (idx < 0)
+            {
+                idx += rooms;
+            }
+
+            s_current_room_index = idx;
+            s_current_device_index = 0;
+
+            lv_obj_t *scr = s_room_pages[s_current_room_index].root;
+            if (!scr)
+            {
+                return;
+            }
+
+            lv_scr_load_anim(scr, anim_type, 300, 0, false);
+        }
+
+        bool get_current_entity_id(std::string &out_entity_id)
+        {
+            out_entity_id.clear();
+
+            if (s_room_pages.empty())
+            {
+                return false;
+            }
+
+            if (s_current_room_index < 0 ||
+                s_current_room_index >= static_cast<int>(s_room_pages.size()))
+            {
+                return false;
+            }
+
+            const RoomPage &page = s_room_pages[s_current_room_index];
+            if (page.devices.empty())
+            {
+                return false;
+            }
+
+            if (s_current_device_index < 0 ||
+                s_current_device_index >= static_cast<int>(page.devices.size()))
+            {
+                return false;
+            }
+
+            out_entity_id = page.devices[static_cast<size_t>(s_current_device_index)].entity_id;
+            return !out_entity_id.empty();
+        }
+
+        bool find_entity_for_control(lv_obj_t *control, std::string &out_entity_id)
+        {
+            out_entity_id.clear();
+
+            if (!control)
+            {
+                return false;
+            }
+
+            for (const auto &page : s_room_pages)
+            {
+                for (const auto &w : page.devices)
+                {
+                    if (w.control == control)
+                    {
+                        out_entity_id = w.entity_id;
+                        return !out_entity_id.empty();
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        void root_gesture_cb(lv_event_t *e)
+        {
+            if (ui::screensaver::is_active())
+            {
+                return;
+            }
+
+            lv_indev_t *indev = lv_indev_get_act();
+            if (!indev)
+            {
+                return;
+            }
+
+            lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+            if (dir == LV_DIR_LEFT)
+            {
+                show_room_relative(+1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
+            }
+            else if (dir == LV_DIR_RIGHT)
+            {
+                show_room_relative(-1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+            }
+        }
+
+        void on_entity_state_changed(const state::Entity &e)
+        {
+            if (s_room_pages.empty())
+            {
+                return;
+            }
+
+            bool updated = false;
+            lvgl_port_lock(-1);
+            for (auto &page : s_room_pages)
+            {
+                if (page.area_id != e.area_id)
+                    continue;
+
+                for (auto &w : page.devices)
+                {
+                    if (w.entity_id != e.id)
+                        continue;
+
+                    if (w.control)
+                    {
+                        bool is_on = (e.state == "on" || e.state == "ON" ||
+                                      e.state == "true" || e.state == "TRUE" ||
+                                      e.state == "1");
+                        ui::controls::set_switch_state(w.control, is_on);
+                    }
+                    updated = true;
+                    break;
+                }
+                if (updated)
+                    break;
+            }
+            lvgl_port_unlock();
         }
 
     } // namespace rooms

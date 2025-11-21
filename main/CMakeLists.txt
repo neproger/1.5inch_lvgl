@@ -6,6 +6,7 @@ idf_component_register(
         "ui/rooms.cpp"
         "ui/screensaver.cpp"
         "ui/splash.cpp"
+        "ui/switch.cpp"
         "wifi_manager.c"
         "ha_mqtt.cpp"
         "app/router.cpp"

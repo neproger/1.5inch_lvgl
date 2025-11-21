@@ -8,9 +8,6 @@
 /* Initialize application UI (LVGL v9) */
 void ui_app_init(void);
 
-/* Initialize screensaver (idle timer, screens) */
-void ui_init_screensaver_support(void);
-
 extern "C"
 {
 #endif

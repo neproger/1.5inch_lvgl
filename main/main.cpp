@@ -56,7 +56,7 @@ extern "C" void app_main(void)
     /* Create your UI under LVGL mutex */
     lvgl_port_lock(0);
     ui_app_init();
-    ui_init_screensaver_support();
+    ui::screensaver::init_support();
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
     lvgl_port_unlock();
