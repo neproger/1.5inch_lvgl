@@ -16,6 +16,11 @@ extern "C"
     /* Start periodic weather HTTP polling */
     void ui_start_weather_polling(void);
 
+    /* Optional: splash screen helpers for early boot */
+    void ui_show_boot_splash(void);
+    void ui_update_boot_splash(int percent);
+    void ui_hide_boot_splash(void);
+
     /* Optional: input event hooks used by device init */
     void LVGL_knob_event(void *event);
     void LVGL_button_event(void *event);

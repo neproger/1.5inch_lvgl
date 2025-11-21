@@ -30,6 +30,9 @@ static int64_t s_last_input_us = 0;
 static lv_obj_t *s_spinner = NULL;
 static std::string s_pending_toggle_entity;
 
+static lv_obj_t *s_splash_root = NULL;
+static lv_obj_t *s_splash_bar = NULL;
+
 enum class UiMode
 {
     Rooms,
@@ -86,6 +89,10 @@ static void switch_event_cb(lv_event_t *e);
 static void on_state_entity_changed(const state::Entity &e);
 static void ui_show_spinner(void);
 static void ui_hide_spinner(void);
+static void ui_set_switches_enabled(bool enabled);
+static void ui_show_splash_screen(void);
+static void ui_update_splash_progress(int percent);
+static void ui_destroy_splash_screen(void);
 static void on_weather_updated_from_http(void);
 static void ui_build_screensaver(void);
 static void idle_timer_cb(lv_timer_t *timer);
@@ -95,18 +102,12 @@ static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type);
 static void clock_timer_cb(lv_timer_t *timer);
 void ui_app_init(void)
 {
-    // Время последнего ввода (как у тебя было)
+    // Track last user input timestamp
     s_last_input_us = esp_timer_get_time();
-    // стартовый экран и стартовый элемент
-    if (!s_room_pages.empty())
-    {
-        s_current_room_index = 0;
-        s_current_device_index = 0;
-        lv_disp_load_scr(s_room_pages[0].root);
-    }
+    // Build UI room pages
     ui_build_room_pages();
 
-    // 3. Таймер для UI — оставляем твой код
+    // Subscribe to entity updates and apply initial state
     {
         const auto &ents = state::entities();
         for (const auto &e : ents)
@@ -115,12 +116,34 @@ void ui_app_init(void)
             if (id > 0)
                 s_state_subscriptions.push_back(id);
         }
-        // Синхронизируем UI с уже известным состоянием (после bootstrap и MQTT)
+        // Apply current state to widgets (bootstrap after MQTT)
         for (const auto &e : ents)
         {
             on_state_entity_changed(e);
         }
     }
+
+    if (!s_room_pages.empty())
+    {
+        s_current_room_index = 0;
+        s_current_device_index = 0;
+        lv_disp_load_scr(s_room_pages[0].root);
+    }
+}
+
+extern "C" void ui_show_boot_splash(void)
+{
+    ui_show_splash_screen();
+}
+
+extern "C" void ui_update_boot_splash(int percent)
+{
+    ui_update_splash_progress(percent);
+}
+
+extern "C" void ui_hide_boot_splash(void)
+{
+    ui_destroy_splash_screen();
 }
 
 extern "C" void ui_init_screensaver_support(void)
@@ -260,6 +283,11 @@ static void handle_single_click(void)
     {
         return;
     }
+    if (s_ha_req_task != NULL)
+    {
+        ESP_LOGW(TAG_UI, "Toggle request already in progress");
+        return;
+    }
     if (!router::is_connected())
     {
         ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
@@ -308,8 +336,14 @@ static void trigger_toggle_for_entity(const std::string &entity_id)
         ESP_LOGW(TAG_UI, "No MQTT connection for toggle");
         return;
     }
+    if (s_ha_req_task != NULL)
+    {
+        ESP_LOGW(TAG_UI, "Toggle already in progress");
+        return;
+    }
 
     s_pending_toggle_entity = entity_id;
+    ui_set_switches_enabled(false);
     ui_show_spinner();
 
     if (s_ha_req_task == NULL)
@@ -319,6 +353,7 @@ static void trigger_toggle_for_entity(const std::string &entity_id)
         {
             ESP_LOGE(TAG_UI, "No memory for toggle arg");
             s_pending_toggle_entity.clear();
+            ui_set_switches_enabled(true);
             ui_hide_spinner();
             return;
         }
@@ -330,6 +365,9 @@ static void trigger_toggle_for_entity(const std::string &entity_id)
             std::free(arg);
             s_ha_req_task = NULL;
             ESP_LOGW(TAG_UI, "Failed to create ha_toggle task");
+            ui_set_switches_enabled(true);
+            s_pending_toggle_entity.clear();
+            ui_hide_spinner();
         }
     }
 }
@@ -346,6 +384,9 @@ static void ha_toggle_task(void *arg)
         ESP_LOGW(TAG_UI, "No WiFi, cannot toggle entity");
         if (entity)
             std::free(entity);
+        s_pending_toggle_entity.clear();
+        ui_set_switches_enabled(true);
+        ui_hide_spinner();
         s_ha_req_task = NULL;
         vTaskDelete(NULL);
         return;
@@ -363,6 +404,7 @@ static void ha_toggle_task(void *arg)
 
     s_ha_req_task = NULL;
     s_pending_toggle_entity.clear();
+    ui_set_switches_enabled(true);
     ui_hide_spinner();
     vTaskDelete(NULL);
 }
@@ -376,6 +418,16 @@ static void switch_event_cb(lv_event_t *e)
     }
 
     lv_obj_t *sw = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    if (lv_obj_has_state(sw, LV_STATE_DISABLED))
+    {
+        ESP_LOGI(TAG_UI, "Toggle ignored, control disabled");
+        return;
+    }
+    if (s_ha_req_task != NULL)
+    {
+        ESP_LOGI(TAG_UI, "Toggle in progress, ignoring switch");
+        return;
+    }
     std::string entity_id;
 
     for (const auto &page : s_room_pages)
@@ -427,41 +479,134 @@ static void ui_hide_spinner(void)
     lvgl_port_unlock();
 }
 
-static void on_state_entity_changed(const state::Entity &e)
+static void ui_set_switches_enabled(bool enabled)
 {
-    // Update widgets for this entity
-    if (!s_room_pages.empty())
+    lvgl_port_lock(-1);
+    for (auto &page : s_room_pages)
     {
-        for (auto &page : s_room_pages)
+        for (auto &w : page.devices)
         {
-            if (page.area_id != e.area_id)
+            if (!w.control)
                 continue;
-
-            for (auto &w : page.devices)
+            if (enabled)
             {
-                if (w.entity_id != e.id)
-                    continue;
-
-                if (w.control)
-                {
-                    bool is_on = (e.state == "on" || e.state == "ON" ||
-                                  e.state == "true" || e.state == "TRUE" ||
-                                  e.state == "1");
-                    lvgl_port_lock(-1);
-                    if (is_on)
-                    {
-                        lv_obj_add_state(w.control, LV_STATE_CHECKED);
-                    }
-                    else
-                    {
-                        lv_obj_clear_state(w.control, LV_STATE_CHECKED);
-                    }
-                    lvgl_port_unlock();
-                }
-                break;
+                lv_obj_clear_state(w.control, LV_STATE_DISABLED);
+            }
+            else
+            {
+                lv_obj_add_state(w.control, LV_STATE_DISABLED);
             }
         }
     }
+    lvgl_port_unlock();
+}
+
+static void ui_show_splash_screen(void)
+{
+    if (s_splash_root)
+    {
+        lv_disp_load_scr(s_splash_root);
+        return;
+    }
+
+    s_splash_root = lv_obj_create(NULL);
+    lv_obj_set_size(s_splash_root, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_bg_color(s_splash_root, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(s_splash_root, 0, 0);
+    lv_obj_remove_flag(s_splash_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *icon = lv_image_create(s_splash_root);
+    lv_image_set_src(icon, &alien);
+    // Make sure icon is visible on black background
+    lv_obj_set_style_img_recolor(icon, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_img_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, 0);
+
+    s_splash_bar = lv_bar_create(s_splash_root);
+    lv_obj_set_width(s_splash_bar, LV_PCT(50));
+    lv_obj_set_height(s_splash_bar, 8);
+    lv_obj_set_style_bg_color(s_splash_bar, lv_color_hex(0x303030), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_splash_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_splash_bar, lv_color_hex(0xE6E6E6), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_splash_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_align(s_splash_bar, LV_ALIGN_BOTTOM_MID, 0, -70);
+    lv_bar_set_range(s_splash_bar, 0, 100);
+    lv_bar_set_value(s_splash_bar, 0, LV_ANIM_OFF);
+
+    lv_disp_load_scr(s_splash_root);
+    lv_refr_now(NULL); // force immediate refresh to avoid a blank screen at boot
+}
+
+static void ui_update_splash_progress(int percent)
+{
+    if (!s_splash_bar)
+    {
+        return;
+    }
+    if (percent < 0)
+        percent = 0;
+    if (percent > 100)
+        percent = 100;
+    lv_bar_set_value(s_splash_bar, percent, LV_ANIM_OFF);
+}
+
+static void ui_destroy_splash_screen(void)
+{
+    if (!s_splash_root)
+    {
+        return;
+    }
+    // Avoid deleting the active screen; caller should have loaded a new one.
+    if (lv_screen_active() == s_splash_root)
+    {
+        return;
+    }
+    lv_obj_del(s_splash_root);
+    s_splash_root = NULL;
+    s_splash_bar = NULL;
+}
+
+static void on_state_entity_changed(const state::Entity &e)
+{
+    // Update widgets for this entity
+    if (s_room_pages.empty())
+    {
+        return;
+    }
+
+    bool updated = false;
+    lvgl_port_lock(-1);
+    for (auto &page : s_room_pages)
+    {
+        if (page.area_id != e.area_id)
+            continue;
+
+        for (auto &w : page.devices)
+        {
+            if (w.entity_id != e.id)
+                continue;
+
+            if (w.control)
+            {
+                bool is_on = (e.state == "on" || e.state == "ON" ||
+                              e.state == "true" || e.state == "TRUE" ||
+                              e.state == "1");
+                if (is_on)
+                {
+                    lv_obj_add_state(w.control, LV_STATE_CHECKED);
+                }
+                else
+                {
+                    lv_obj_clear_state(w.control, LV_STATE_CHECKED);
+                }
+            }
+            updated = true;
+            break;
+        }
+        if (updated)
+            break;
+    }
+    lvgl_port_unlock();
 }
 
 static void ui_build_screensaver(void)
@@ -791,87 +936,87 @@ namespace // room pages impl
             const std::string &cond = w.condition;
             if (cond == "clear")
             {
-                cond_text = "ясно";
+                cond_text = "Ясно";
                 icon = &clear;
             }
             else if (cond == "clear-night")
             {
-                cond_text = "ясно";
+                cond_text = "Ясно";
                 icon = &clear_night;
             }
             else if (cond == "sunny")
             {
-                cond_text = "солнечно";
+                cond_text = "Солнечно";
                 icon = &sunny;
             }
             else if (cond == "partlycloudy")
             {
-                cond_text = "переменная облачность";
+                cond_text = "Переменная облачность";
                 icon = &partlycloudy;
             }
             else if (cond == "cloudy")
             {
-                cond_text = "облачно";
+                cond_text = "Облачно";
                 icon = &cloudy;
             }
             else if (cond == "overcast")
             {
-                cond_text = "пасмурно";
+                cond_text = "Пасмурно";
                 icon = &overcast;
             }
             else if (cond == "rainy")
             {
-                cond_text = "дождь";
+                cond_text = "Дождь";
                 icon = &rainy;
             }
             else if (cond == "pouring")
             {
-                cond_text = "ливень";
+                cond_text = "Ливень";
                 icon = &pouring;
             }
             else if (cond == "lightning")
             {
-                cond_text = "гроза";
+                cond_text = "Гроза";
                 icon = &lightning;
             }
             else if (cond == "lightning-rainy")
             {
-                cond_text = "гроза с дождём";
+                cond_text = "Гроза и дождь";
                 icon = &lightning_rainy;
             }
             else if (cond == "snowy")
             {
-                cond_text = "снег";
+                cond_text = "Снег";
                 icon = &snowy;
             }
             else if (cond == "snowy-rainy")
             {
-                cond_text = "снег с дождём";
+                cond_text = "Снег с дождём";
                 icon = &snowy_rainy;
             }
             else if (cond == "hail")
             {
-                cond_text = "град";
+                cond_text = "Град";
                 icon = &hail;
             }
             else if (cond == "fog")
             {
-                cond_text = "туман";
+                cond_text = "Туман";
                 icon = &fog;
             }
             else if (cond == "windy")
             {
-                cond_text = "ветрено";
+                cond_text = "Ветрено";
                 icon = &windy;
             }
             else if (cond == "windy-variant")
             {
-                cond_text = "ветрено, переменная погода";
+                cond_text = "Ветрено, переменная облачность";
                 icon = &windy_variant;
             }
             else if (cond == "exceptional")
             {
-                cond_text = "экстремальные условия";
+                cond_text = "Необычная погода";
                 icon = &alien;
             }
             else
@@ -966,7 +1111,7 @@ namespace // room pages impl
             char date_buf[32];
 
             std::snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d", hour, minute, second);
-            std::snprintf(date_buf, sizeof(date_buf), "%s, %d", kMonthNames[month], day); // формат "Январь, 8"
+            std::snprintf(date_buf, sizeof(date_buf), "%s, %d", kMonthNames[month], day);
 
             if (s_time_label)
                 lv_label_set_text(s_time_label, time_buf);
