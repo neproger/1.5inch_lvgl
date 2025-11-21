@@ -2,7 +2,10 @@ idf_component_register(
     SRCS
         "main.cpp"
         "devices_init.c"
-        "ui_app.cpp"
+        "ui/ui_app.cpp"
+        "ui/rooms.cpp"
+        "ui/screensaver.cpp"
+        "ui/splash.cpp"
         "wifi_manager.c"
         "ha_mqtt.cpp"
         "app/router.cpp"
