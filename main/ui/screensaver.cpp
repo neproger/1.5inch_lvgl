@@ -60,17 +60,17 @@ namespace ui
             lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_30, 0);
             lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, -30);
 
-            s_date_label = lv_label_create(s_screensaver_root);
-            lv_label_set_text(s_date_label, "");
-            lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xFFFFFF), 0);
-            lv_obj_set_style_text_font(s_date_label, &Montserrat_40, 0);
-            lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0, -115);
-
             s_week_day_label = lv_label_create(s_screensaver_root);
             lv_label_set_text(s_week_day_label, "");
             lv_obj_set_style_text_color(s_week_day_label, lv_color_hex(0xFFFFFF), 0);
             lv_obj_set_style_text_font(s_week_day_label, &Montserrat_40, 0);
-            lv_obj_align(s_week_day_label, LV_ALIGN_BOTTOM_MID, 0, -70);
+            lv_obj_align(s_week_day_label, LV_ALIGN_BOTTOM_MID, 0, -80);
+
+            s_date_label = lv_label_create(s_screensaver_root);
+            lv_label_set_text(s_date_label, "");
+            lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xFFFFFF), 0);
+            lv_obj_set_style_text_font(s_date_label, &Montserrat_40, 0);
+            lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0, -40);
 
             s_time_label = lv_label_create(s_screensaver_root);
             lv_label_set_text(s_time_label, "");
