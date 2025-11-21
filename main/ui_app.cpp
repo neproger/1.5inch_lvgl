@@ -634,36 +634,36 @@ static void ui_build_screensaver(void)
     s_weather_temp_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_temp_label, "");
     lv_obj_set_style_text_color(s_weather_temp_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(s_weather_temp_label, &Montserrat_70, 0);
-    lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_text_font(s_weather_temp_label, &Montserrat_40, 0);
+    lv_obj_align(s_weather_temp_label, LV_ALIGN_CENTER, 0, -70);
 
     // Состояние погоды
     s_weather_cond_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_weather_cond_label, "");
     lv_obj_set_style_text_color(s_weather_cond_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_weather_cond_label, &Montserrat_30, 0);
-    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, -80);
+    lv_obj_align(s_weather_cond_label, LV_ALIGN_CENTER, 0, -30);
 
     // Дата
     s_date_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_date_label, "");
     lv_obj_set_style_text_color(s_date_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_date_label, &Montserrat_40, 0);
-    lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0, -130);
+    lv_obj_align(s_date_label, LV_ALIGN_BOTTOM_MID, 0, -115);
 
     // День недели
     s_week_day_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_week_day_label, "");
     lv_obj_set_style_text_color(s_week_day_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(s_week_day_label, &Montserrat_40, 0);
-    lv_obj_align(s_week_day_label, LV_ALIGN_BOTTOM_MID, 0, -90);
+    lv_obj_align(s_week_day_label, LV_ALIGN_BOTTOM_MID, 0, -70);
 
     // Время
     s_time_label = lv_label_create(s_screensaver_root);
     lv_label_set_text(s_time_label, "");
     lv_obj_set_style_text_color(s_time_label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(s_time_label, &Montserrat_40, 0);
-    lv_obj_align(s_time_label, LV_ALIGN_BOTTOM_MID, 0, -16);
+    lv_obj_set_style_text_font(s_time_label, &Montserrat_70, 0);
+    lv_obj_align(s_time_label, LV_ALIGN_CENTER, 0, 20);
 
     // Wake from screensaver on any touch on this screen
     lv_obj_add_event_cb(s_screensaver_root, screensaver_input_cb, LV_EVENT_PRESSED, nullptr);

@@ -38,7 +38,7 @@ namespace http_manager
         static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
         static const char *kWeatherTemplateBody = R"json(
 {
-  "template": "Temperature,Condition\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }}°C, {{ w.state if w else 'N/A' }}"
+  "template": "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"
 }
 )json";
 
