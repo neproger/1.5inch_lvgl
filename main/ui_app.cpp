@@ -52,8 +52,8 @@ static lv_obj_t *s_week_day_label = NULL;
 static lv_timer_t *s_clock_timer = NULL;
 static const uint32_t kScreensaverTimeoutMs = 10000;
 
-namespace // room pages
-{
+namespace ui {
+namespace rooms {
     struct DeviceWidget
     {
         std::string entity_id;
@@ -80,7 +80,16 @@ namespace // room pages
 
     static void ui_build_room_pages();
     static void ui_update_weather_label();
-}
+} // namespace rooms
+} // namespace ui
+
+using ui::rooms::DeviceWidget;
+using ui::rooms::RoomPage;
+using ui::rooms::s_current_device_index;
+using ui::rooms::s_current_room_index;
+using ui::rooms::s_room_pages;
+using ui::rooms::ui_build_room_pages;
+using ui::rooms::ui_update_weather_label;
 
 static void handle_single_click(void);
 static void ha_toggle_task(void *arg);
@@ -786,7 +795,9 @@ static void ui_load_room_screen(int new_index, lv_screen_load_anim_t anim_type)
     lv_scr_load_anim(scr, anim_type, 300, 0, false);
 }
 
-namespace // room pages impl
+namespace ui
+{
+namespace rooms
 {
     static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
     {
@@ -1122,7 +1133,8 @@ namespace // room pages impl
         }
     }
 
-} // namespace
+} // namespace rooms
+} // namespace ui
 
 // Legacy overlay labels (status/info) removed in new UI:
 // each entity is represented by its own widget on the room page.
