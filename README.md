@@ -1,104 +1,134 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- |
+# Smart Knob Display (1.5″, LVGL + ESP-IDF)
 
-| Supported LCD Controllers | SPD2010 | GC9B71 | SH8601 |
-| ------------------------- | ------- | ------ | ------ |
+Прошивка для компактного настенного/настольного устройства на базе ESP32 и LVGL.
 
-# QSPI LCD (with RAM) and Touch Panel Example
+**Железо:**
 
-[esp_lcd](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/lcd.html) provides several panel drivers out-of box, e.g. ST7789, SSD1306, NT35510. However, there're a lot of other panels on the market, it's beyond `esp_lcd` component's responsibility to include them all.
+- 1,5‑дюймовый дисплей Smart Knob с сенсорным управлением
+- Модель: UEDX46460015-WB-A
+- Версия: V1.1
+- Дата: 16.10.2024
 
-`esp_lcd` allows user to add their own panel drivers in the project scope (i.e. panel driver can live outside of esp-idf), so that the upper layer code like LVGL porting code can be reused without any modifications, as long as user-implemented panel driver follows the interface defined in the `esp_lcd` component.
+## Для чего этот проект
 
-This example shows how to use SPD1020, GC9B71 or SH8601 display driver from Component manager in esp-idf project. These components are using API provided by `esp_lcd` component. This example will draw a fancy dash board with the LVGL library.
+Устройство задумывается как “умный энкодер с экраном” — компактный контроллер для управления умным домом и отображения текущего состояния.
 
-This example uses the [esp_timer](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/system/esp_timer.html) to generate the ticks needed by LVGL and uses a dedicated task to run the `lv_timer_handler()`. Since the LVGL APIs are not thread-safe, this example uses a mutex which be invoked before the call of `lv_timer_handler()` and released after it. The same mutex needs to be used in other tasks and threads around every LVGL (lv_...) related function call and code. For more porting guides, please refer to [LVGL porting doc](https://docs.lvgl.io/master/porting/index.html).
+Ключевая фишка: UI собирается автоматически из данных Home Assistant. Как только вы добавляете новое устройство в комнату (area) в HA, оно появляется в интерфейсе этого дисплея без перепрошивки — прошивка подхватывает конфигурацию при bootstrap по HTTP.
 
-## Touch controller
+Основные сценарии:
 
-In this example you can enable touch controller SPD2010 or CST816 connected via I2C.
+- просмотр комнат и устройств (свет, розетки и т.п.) и их переключение;
+- отображение часов и погоды в режиме заставки;
+- показ прогресса загрузки/инициализации (boot splash);
+- интеграция с Home Assistant через HTTP/MQTT (через отдельный router/http слой).
 
-## How to use the example
+## Структура проекта (по модулям)
 
-### Hardware Required
+### Основной вход
 
-* An ESP development board
-* A SPD1020, GC9B71 or SH8601 LCD panel, with QSPI interface (with/without touch)
-* An USB cable for power supply and programming
+- `main/main.cpp`  
+  Инициализация Wi‑Fi, дисплея, LVGL и устройств, старт bootstrap по HTTP, запуск роутера/MQTT и создание UI:
+  - показывает boot splash и обновляет прогресс инициализации;
+  - вызывает `ui_app_init()` для построения экранов комнат;
+  - включает поддержку скринсейвера (`ui::screensaver::init_support()`);
+  - запускает периодические опросы погоды (`ui::screensaver::start_weather_polling()`).
 
-### Hardware Connection
+### Состояние и сетевое окружение
 
-The connection between ESP Board and the LCD is as follows:
+- `main/state_manager.cpp`  
+  Хранит:
+  - список areas (комнат);
+  - список entities (устройства/сущности HA);
+  - погоду (`WeatherState`) и время (`ClockState`);
+  - подписки UI на изменение состояния (`subscribe_entity`).
 
-```
-       ESP Board                SPD1020, GC9B71 or SH8601 Panel (QSPI)
-┌──────────────────────┐              ┌────────────────────┐
-│             GND      ├─────────────►│ GND                │
-│                      │              │                    │
-│             3V3      ├─────────────►│ VCC                │
-│                      │              │                    │
-│             CS       ├─────────────►│ CS                 │
-│                      │              │                    │
-│             SCK      ├─────────────►│ CLK                │
-│                      │              │                    │
-│             D3       ├─────────────►│ IO3                │
-│                      │              │                    │
-│             D2       ├─────────────►│ IO2                │
-│                      │              │                    │
-│             D1       ├─────────────►│ IO1                │
-│                      │              │                    │
-│             D0       ├─────────────►│ IO0                │
-│                      │              │                    │
-│             RST      ├─────────────►│ RSTN               │
-│                      │              │                    │
-│             (SCL)    ├─────────────►│ TP_SCL             │
-│                      │              │                    │
-│             (SDA)    ├─────────────►│ TP_SDA             │
-│                      │              │                    │
-│             (TP_INT) ├─────────────►│ TP_INT             │
-│                      │              │                    │
-│             (3V3)    ├─────────────►│ TP_RST             │
-│                      │              │                    │
-└──────────────────────┘              └────────────────────┘
-```
+- `main/http_manager.cpp`  
+  - bootstrap состояния из Home Assistant по HTTP (CSV);
+  - запуск фонового опроса погоды, вызов callback после `set_weather()`.
 
-* The LCD parameters and GPIO number used by this example can be changed in [example_qspi_with_ram.c](main/example_qspi_with_ram.c). Especially, please pay attention to the **vendor specific initialization**, it can be different between manufacturers and should consult the LCD supplier for initialization sequence code.
+- `main/app/router.cpp`  
+  - инкапсулирует транспорт (обычно MQTT);
+  - предоставляет `router::toggle(entity_id)` и `router::is_connected()`.
 
-### Configure the Project
+### UI: комнаты
 
-Run `idf.py menuconfig` and navigate to `Example Configuration` menu.
+- `main/ui/rooms.hpp`, `main/ui/rooms.cpp`  
+  Отвечает за “страницы комнат”:
+  - описывает структуры:
+    - `RoomPage` (корневой объект LVGL, заголовок, список виджетов устройств);
+    - `DeviceWidget` (контейнер + подпись + контрол).
+  - строит все страницы на основе `state::areas()` и `state::entities()` (`ui_build_room_pages()`);
+  - хранит вектора `s_room_pages`, `s_current_room_index`, `s_current_device_index`;
+  - умеет:
+    - показать первую комнату (`show_initial_room()`);
+    - листать комнаты с анимацией (`show_room_relative()`);
+    - вернуть `entity_id` текущего выбранного девайса (`get_current_entity_id()`);
+    - найти `entity_id` по LVGL‑контролу (`find_entity_for_control()`);
+    - обновлять виджеты при изменении состояния сущности (`on_entity_state_changed()`);
+    - обрабатывать жесты на корневом объекте комнаты (`root_gesture_cb()`).
 
-### Build and Flash
+### UI: скринсейвер (часы + погода)
 
-Run `idf.py -p PORT build flash monitor` to build, flash and monitor the project. A fancy animation will show up on the LCD as expected.
+- `main/ui/screensaver.hpp`, `main/ui/screensaver.cpp`  
+  Экран заставки с погодой и часами:
+  - строит отдельный корневой экран LVGL для скринсейвера (`ui_build_screensaver()`);
+  - поддерживает:
+    - `init_support()` — создание таймеров idle/clock, навешивание input‑callback;
+    - `ui_update_weather_and_clock()` — читает `state::weather()` и `state::clock()`, обновляет лейблы и иконку;
+    - `start_weather_polling()` — подключается к `http_manager` и обновляет скринсейвер при новых данных;
+    - `show()` / `hide_to_room()` — переходы между скринсейвером и текущей комнатой;
+    - `is_active()` — флаг, активен ли сейчас скринсейвер.
 
-The first time you run `idf.py` for the example will cost extra time as the build system needs to address the component dependencies and downloads the missing components from registry into `managed_components` folder.
+Логика таймаута (idle‑timer) и возврата по тапу полностью живёт внутри этого модуля.
 
-(To exit the serial monitor, type ``Ctrl-]``.)
+### UI: splash (экран загрузки)
 
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
+- `main/ui/splash.hpp`, `main/ui/splash.cpp`  
+  Простой стартовый экран:
+  - `show()` — создаёт корневой экран с логотипом и прогресс‑баром;
+  - `update_progress(int percent)` — обновляет прогресс;
+  - `destroy()` — убирает splash, когда UI полностью готов.
 
-### Example Output
+Используется только из `main.cpp`, без промежуточных врапперов в `ui_app`.
+
+### UI: switch + toggle логика
+
+- `main/ui/switch.hpp`, `main/ui/switch.cpp`  
+  Инкапсулирует поведение свитчей и логику “переключить сущность в HA”:
+  - `namespace ui::controls`:
+    - `set_switch_state(lv_obj_t *control, bool is_on)` — проставляет `LV_STATE_CHECKED`;
+    - `set_switch_enabled(lv_obj_t *control, bool enabled)` — включает/выключает `LV_STATE_DISABLED`.
+  - `namespace ui::toggle`:
+    - `switch_event_cb(lv_event_t *e)` — общий обработчик для всех switch‑контролов;
+    - `trigger_toggle_for_entity(const std::string &entity_id)` — дебаунс, проверка Wi‑Fi/MQTT, запуск `ha_toggle_task`;
+    - внутри: спиннер на экране, блокировка/разблокировка всех свитчей, запуск отдельной FreeRTOS‑таски.
+
+Благодаря этому модулю, логика переключения больше не размазана по `ui_app` и может использоваться в других экранах.
+
+### UI: приложение
+
+- `main/ui/ui_app.cpp`  
+  Сейчас это тонкий “оркестр” вокруг модулей:
+  - строит страницы комнат (`ui_build_room_pages()`);
+  - навешивает обработчики:
+    - жесты комнат (`ui::rooms::root_gesture_cb`);
+    - свитчи (`ui::toggle::switch_event_cb`);
+    - knob / button события (`LVGL_knob_event`, `LVGL_button_event` — C API для `devices_init.c`);
+  - подписывает UI на обновление сущностей через `state_manager` и делегирует изменения в `ui::rooms::on_entity_state_changed`;
+  - в `handle_single_click()` по текущему выделенному виджету дергает `ui::toggle::trigger_toggle_for_entity()`.
+
+В файле больше нет работы напрямую с “сырыми” LVGL‑объектами скринсейвера или разрозненных глобалов — всё вынесено в отдельные модули.
+
+## Сборка и прошивка
+
+Проект использует ESP‑IDF и стандартный `idf.py`‑workflow.
+
+Минимальный цикл разработки:
 
 ```bash
-...
-I (415) example: Turn off LCD backlight
-I (420) gpio: GPIO[0]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
-I (429) example: Initialize SPI bus
-I (434) example: Install panel IO
-I (438) example: Install SPD2010 panel driver
-I (442) gpio: GPIO[17]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0
-I (452) spd2010: LCD panel create success, version: 0.0.1
-I (741) example: Turn on LCD backlight
-I (741) example: Initialize LVGL library
-I (741) example: Register display driver to LVGL
-I (746) example: Install LVGL tick timer
-I (748) example: Starting LVGL task
-I (795) example: Display LVGL demos
-I (1038) main_task: Returned from app_main()
-...
+idf.py set-target esp32s3   # или другой нужный чип
+idf.py menuconfig           # настроить Wi‑Fi, пины дисплея и т.д.
+idf.py -p COMx build flash monitor
 ```
 
-## Troubleshooting
-
-For any technical queries, please open an [issue] (https://github.com/espressif/esp-iot-solution/issues) on GitHub. We will get back to you soon.
+LVGL уже интегрирован через `esp_lvgl_port`. Все обращения к LVGL внутри проекта выполняются под `lvgl_port_lock(...)` там, где это необходимо.
