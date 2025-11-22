@@ -14,6 +14,7 @@
 #include "wifi_manager.h"
 #include "http_manager.hpp"
 #include "app/router.hpp"
+#include "app/event_logger.hpp"
 
 static const char *TAG_APP = "app";
 
@@ -29,6 +30,9 @@ extern "C" void app_main(void)
     {
         return;
     }
+
+    // Log all events from the default ESP event loop for inspection/debugging
+    (void)event_logger::init();
 
     /* Show splash as early as possible so user sees progress during bootstrap */
     lvgl_port_lock(0);
