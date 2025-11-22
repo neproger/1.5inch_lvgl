@@ -10,6 +10,8 @@ idf_component_register(
         "wifi_manager.c"
         "ha_mqtt.cpp"
         "app/router.cpp"
+        "app/app_events.cpp"
+        "app/input_controller.cpp"
         "app/event_logger.cpp"
         "app/entities.cpp"
         "state_manager.cpp"

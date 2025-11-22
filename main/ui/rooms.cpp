@@ -3,11 +3,13 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_event.h"
 #include "fonts.h"
 #include "icons.h"
 #include "state_manager.hpp"
 #include "switch.hpp"
 #include "screensaver.hpp"
+#include "app/app_events.hpp"
 
 #include <cstdio>
 
@@ -16,6 +18,7 @@ namespace ui
     namespace rooms
     {
         static const char *TAG_UI_ROOMS = "UI_ROOMS";
+        static bool s_nav_handler_registered = false;
 
         std::vector<RoomPage> s_room_pages;
         int s_current_room_index = 0;
@@ -127,6 +130,55 @@ namespace ui
 
                 s_room_pages.push_back(std::move(page));
             }
+
+            if (!s_nav_handler_registered)
+            {
+                esp_event_handler_instance_t inst = nullptr;
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::NAVIGATE_ROOM,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
+                    {
+                        if (base != APP_EVENTS || id != app_events::NAVIGATE_ROOM)
+                        {
+                            return;
+                        }
+
+                        const auto *payload = static_cast<const app_events::NavigateRoomPayload *>(event_data);
+                        if (!payload)
+                        {
+                            return;
+                        }
+                        int delta = payload->delta;
+
+                        lvgl_port_lock(-1);
+
+                        if (delta > 0)
+                        {
+                            show_room_relative(+1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
+                        }
+                        else if (delta < 0)
+                        {
+                            show_room_relative(-1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
+                        }
+
+                        if (!s_room_pages.empty())
+                        {
+                            const RoomPage &page = s_room_pages[s_current_room_index];
+                            const char *room_name = page.area_name.c_str();
+                            ESP_LOGI(TAG_UI_ROOMS, "NAVIGATE_ROOM delta=%d | room=%d/%d %s",
+                                     delta,
+                                     s_current_room_index,
+                                     static_cast<int>(s_room_pages.size()),
+                                     room_name);
+                        }
+
+                        lvgl_port_unlock();
+                    },
+                    nullptr,
+                    &inst);
+                s_nav_handler_registered = true;
+            }
         }
 
         void show_initial_room()
@@ -226,30 +278,6 @@ namespace ui
             }
 
             return false;
-        }
-
-        void root_gesture_cb(lv_event_t *e)
-        {
-            if (ui::screensaver::is_active())
-            {
-                return;
-            }
-
-            lv_indev_t *indev = lv_indev_get_act();
-            if (!indev)
-            {
-                return;
-            }
-
-            lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-            if (dir == LV_DIR_LEFT)
-            {
-                show_room_relative(+1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
-            }
-            else if (dir == LV_DIR_RIGHT)
-            {
-                show_room_relative(-1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
-            }
         }
 
         void on_entity_state_changed(const state::Entity &e)

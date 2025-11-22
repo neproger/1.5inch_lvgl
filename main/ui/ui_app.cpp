@@ -2,10 +2,12 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_event.h"
 #include "state_manager.hpp"
 #include "rooms.hpp"
 #include "screensaver.hpp"
 #include "switch.hpp"
+#include "app/app_events.hpp"
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -15,7 +17,6 @@
 static const char *TAG_UI = "UI";
 
 static std::vector<int> s_state_subscriptions;
-static int64_t s_last_input_us = 0;
 
 using ui::rooms::DeviceWidget;
 using ui::rooms::RoomPage;
@@ -25,11 +26,10 @@ using ui::rooms::s_room_pages;
 using ui::rooms::ui_build_room_pages;
 using ui::screensaver::s_screensaver_root;
 
-static void handle_single_click(void);
+static void root_input_cb(lv_event_t *e);
+
 void ui_app_init(void)
 {
-    // Track last user input timestamp
-    s_last_input_us = esp_timer_get_time();
     // Build UI room pages
     ui_build_room_pages();
 
@@ -38,7 +38,7 @@ void ui_app_init(void)
     {
         if (page.root)
         {
-            lv_obj_add_event_cb(page.root, ui::rooms::root_gesture_cb, LV_EVENT_GESTURE, nullptr);
+            lv_obj_add_event_cb(page.root, root_input_cb, LV_EVENT_GESTURE, nullptr);
         }
         for (auto &w : page.devices)
         {
@@ -47,6 +47,12 @@ void ui_app_init(void)
                 lv_obj_add_event_cb(w.control, ui::toggle::switch_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
             }
         }
+    }
+
+    // Attach root input handler to screensaver root for press events
+    if (s_screensaver_root)
+    {
+        lv_obj_add_event_cb(s_screensaver_root, root_input_cb, LV_EVENT_PRESSED, nullptr);
     }
 
     // Subscribe to entity updates and apply initial state
@@ -69,119 +75,54 @@ void ui_app_init(void)
     {
         ui::rooms::show_initial_room();
     }
+
+    // Optional: additional UI-level subscriptions can be added here later
 }
 
-static const char *knob_event_table[] = {
-    "KNOB_RIGHT",
-    "KNOB_LEFT",
-    "KNOB_H_LIM",
-    "KNOB_L_LIM",
-    "KNOB_ZERO",
-};
-
-extern "C" void LVGL_knob_event(void *event)
+static void root_input_cb(lv_event_t *e)
 {
-    int ev = (int)(intptr_t)event;
-    s_last_input_us = esp_timer_get_time();
-
-    lv_display_trigger_activity(NULL);
-
-    if (ui::screensaver::is_active())
+    if (!e)
     {
-        if (!s_room_pages.empty())
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(e);
+    std::int64_t now_us = esp_timer_get_time();
+
+    if (code == LV_EVENT_GESTURE)
+    {
+        lv_indev_t *indev = lv_indev_get_act();
+        if (!indev)
         {
-            int rooms = static_cast<int>(s_room_pages.size());
-            if (s_current_room_index < 0 || s_current_room_index >= rooms)
-            {
-                s_current_room_index = 0;
-            }
-            ui::screensaver::hide_to_room(s_room_pages[s_current_room_index].root);
+            return;
         }
-        return;
-    }
 
-    switch (ev)
-    {
-    case 0: // next room
-        ui::rooms::show_room_relative(+1, LV_SCREEN_LOAD_ANIM_MOVE_LEFT);
-        break;
-    case 1: // previous room
-        ui::rooms::show_room_relative(-1, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT);
-        break;
-    default:
-        break;
-    }
-
-    if (!s_room_pages.empty())
-    {
-        const RoomPage &page = s_room_pages[s_current_room_index];
-        const char *room_name = page.area_name.c_str();
-        ESP_LOGI(TAG_UI, "%s | room=%d/%d %s",
-                 knob_event_table[ev],
-                 s_current_room_index,
-                 static_cast<int>(s_room_pages.size()),
-                 room_name);
-    }
-}
-
-static const char *button_event_table[] = {
-    "PRESS_DOWN",
-    "PRESS_UP",
-    "PRESS_REPEAT",
-    "PRESS_REPEAT_DONE",
-    "SINGLE_CLICK",
-    "DOUBLE_CLICK",
-    "MULTIPLE_CLICK",
-    "LONG_PRESS_START",
-    "LONG_PRESS_HOLD",
-    "LONG_PRESS_UP",
-    "PRESS_END",
-};
-
-extern "C" void LVGL_button_event(void *event)
-{
-    int ev = (int)(intptr_t)event;
-    s_last_input_us = esp_timer_get_time();
-
-    lv_display_trigger_activity(NULL);
-
-    if (ui::screensaver::is_active())
-    {
-        if (!s_room_pages.empty())
+        lv_dir_t dir = lv_indev_get_gesture_dir(indev);
+        int gesture_code = -1;
+        if (dir == LV_DIR_LEFT)
         {
-            int rooms = static_cast<int>(s_room_pages.size());
-            if (s_current_room_index < 0 || s_current_room_index >= rooms)
-            {
-                s_current_room_index = 0;
-            }
-            ui::screensaver::hide_to_room(s_room_pages[s_current_room_index].root);
+            gesture_code = 0; // swipe left -> next room
         }
-        return;
-    }
+        else if (dir == LV_DIR_RIGHT)
+        {
+            gesture_code = 1; // swipe right -> previous room
+        }
 
-    const int table_sz = sizeof(button_event_table) / sizeof(button_event_table[0]);
-    const char *label = (ev >= 0 && ev < table_sz) ? button_event_table[ev] : "BUTTON_UNKNOWN";
-    switch (ev)
+        if (gesture_code >= 0)
+        {
+            (void)app_events::post_gesture(gesture_code, now_us, false);
+        }
+    }
+    else if (code == LV_EVENT_PRESSED)
     {
-    case 4:
-        ESP_LOGI(TAG_UI, "%s", label);
-        handle_single_click();
-        break;
-    default:
-        break;
+        lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_target(e));
+        if (target == s_screensaver_root)
+        {
+            (void)app_events::post_wake_screensaver(now_us, false);
+        }
     }
 }
 
-static void handle_single_click(void)
-{
-    std::string entity_id;
-
-    if (!ui::rooms::get_current_entity_id(entity_id))
-    {
-        ESP_LOGW(TAG_UI, "No entity selected for toggle");
-        return;
-    }
-
-    ui::toggle::trigger_toggle_for_entity(entity_id);
-}
+// Currently no UI-level event handlers; high-level events are handled
+// by their respective domains (screensaver, rooms, input_controller).
 

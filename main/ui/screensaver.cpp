@@ -2,10 +2,12 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_event.h"
 #include "fonts.h"
 #include "http_manager.hpp"
 #include "icons.h"
 #include "state_manager.hpp"
+#include "app/app_events.hpp"
 
 namespace ui
 {
@@ -26,7 +28,6 @@ namespace ui
 
         static void on_weather_updated_from_http(void);
         static void idle_timer_cb(lv_timer_t *timer);
-        static void screensaver_input_cb(lv_event_t *e);
         static void clock_timer_cb(lv_timer_t *timer);
 
         void ui_build_screensaver()
@@ -93,10 +94,49 @@ namespace ui
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
             }
 
-            if (s_screensaver_root)
+            // Subscribe screensaver to wake events
+            static bool s_wake_handler_registered = false;
+            if (!s_wake_handler_registered)
             {
-                lv_obj_add_event_cb(s_screensaver_root, screensaver_input_cb, LV_EVENT_PRESSED, nullptr);
+                esp_event_handler_instance_t inst = nullptr;
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::WAKE_SCREENSAVER,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    {
+                        if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                        {
+                            return;
+                        }
+
+                        lvgl_port_lock(-1);
+
+                        if (s_active)
+                        {
+                            if (!rooms::s_room_pages.empty())
+                            {
+                                int rooms = static_cast<int>(rooms::s_room_pages.size());
+                                if (rooms > 0)
+                                {
+                                    if (rooms::s_current_room_index < 0 || rooms::s_current_room_index >= rooms)
+                                    {
+                                        rooms::s_current_room_index = 0;
+                                    }
+                                    hide_to_room(rooms::s_room_pages[rooms::s_current_room_index].root);
+                                    // Prevent the same touch from being delivered
+                                    // to widgets on the newly shown room screen.
+                                    lv_indev_reset(NULL, nullptr);
+                                }
+                            }
+                        }
+
+                        lvgl_port_unlock();
+                    },
+                    nullptr,
+                    &inst);
+                s_wake_handler_registered = true;
             }
+
         }
 
         bool is_active()
@@ -350,35 +390,6 @@ namespace ui
                     show();
                 }
             }
-        }
-
-        static void screensaver_input_cb(lv_event_t *e)
-        {
-            if (!s_active)
-            {
-                return;
-            }
-
-            lv_event_code_t code = lv_event_get_code(e);
-            if (code != LV_EVENT_PRESSED)
-            {
-                return;
-            }
-
-            if (!rooms::s_room_pages.empty())
-            {
-                int rooms = static_cast<int>(rooms::s_room_pages.size());
-                if (rooms > 0)
-                {
-                    if (rooms::s_current_room_index < 0 || rooms::s_current_room_index >= rooms)
-                    {
-                        rooms::s_current_room_index = 0;
-                    }
-                    hide_to_room(rooms::s_room_pages[rooms::s_current_room_index].root);
-                }
-            }
-
-            lv_indev_reset(NULL, nullptr);
         }
 
         static void clock_timer_cb(lv_timer_t *timer)

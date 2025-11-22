@@ -54,7 +54,5 @@ namespace ui
         // Apply updated entity state to corresponding widgets on room pages
         void on_entity_state_changed(const state::Entity &e);
 
-        // Root gesture callback attached to room screens (page.root)
-        void root_gesture_cb(lv_event_t *e);
     } // namespace rooms
 } // namespace ui

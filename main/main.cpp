@@ -15,6 +15,7 @@
 #include "http_manager.hpp"
 #include "app/router.hpp"
 #include "app/event_logger.hpp"
+#include "app/input_controller.hpp"
 
 static const char *TAG_APP = "app";
 
@@ -30,6 +31,9 @@ extern "C" void app_main(void)
     {
         return;
     }
+
+    // Initialize application-level input mapping
+    (void)input_controller::init();
 
     // Log all events from the default ESP event loop for inspection/debugging
     (void)event_logger::init();
@@ -59,8 +63,8 @@ extern "C" void app_main(void)
 
     /* Create your UI under LVGL mutex */
     lvgl_port_lock(0);
-    ui_app_init();
     ui::screensaver::init_support();
+    ui_app_init();
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
     lvgl_port_unlock();
