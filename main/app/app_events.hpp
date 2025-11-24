@@ -17,6 +17,15 @@ namespace app_events
         NAVIGATE_ROOM = 10,
         WAKE_SCREENSAVER = 11,
         TOGGLE_CURRENT_ENTITY = 12,
+        ENTITY_STATE_CHANGED = 20,
+        TOGGLE_REQUEST = 30,
+        TOGGLE_RESULT = 31,
+    };
+
+    enum class GestureCode : int
+    {
+        SwipeLeft = 0,
+        SwipeRight = 1,
     };
 
     struct KnobPayload
@@ -53,6 +62,25 @@ namespace app_events
         std::int64_t timestamp_us = 0;
     };
 
+    struct EntityStateChangedPayload
+    {
+        char entity_id[96];
+        std::int64_t timestamp_us = 0;
+    };
+
+    struct ToggleRequestPayload
+    {
+        char entity_id[96];
+        std::int64_t timestamp_us = 0;
+    };
+
+    struct ToggleResultPayload
+    {
+        char entity_id[96];
+        bool success = false;
+        std::int64_t timestamp_us = 0;
+    };
+
     // Currently a no-op stub; kept for symmetry / future use
     inline esp_err_t init()
     {
@@ -65,5 +93,8 @@ namespace app_events
     esp_err_t post_navigate_room(int delta, std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_wake_screensaver(std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_toggle_current_entity(std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_entity_state_changed(const char *entity_id, std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_toggle_request(const char *entity_id, std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_toggle_result(const char *entity_id, bool success, std::int64_t timestamp_us, bool from_isr);
 
 } // namespace app_events

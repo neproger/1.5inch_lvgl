@@ -19,6 +19,8 @@ namespace ui
     {
         static const char *TAG_UI_ROOMS = "UI_ROOMS";
         static bool s_nav_handler_registered = false;
+        static bool s_wake_handler_registered = false;
+        static bool s_entity_handler_registered = false;
 
         std::vector<RoomPage> s_room_pages;
         int s_current_room_index = 0;
@@ -178,6 +180,82 @@ namespace ui
                     nullptr,
                     &inst);
                 s_nav_handler_registered = true;
+            }
+
+            if (!s_wake_handler_registered)
+            {
+                esp_event_handler_instance_t inst = nullptr;
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::WAKE_SCREENSAVER,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    {
+                        if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                        {
+                            return;
+                        }
+
+                        if (!ui::screensaver::is_active())
+                        {
+                            return;
+                        }
+
+                        lvgl_port_lock(-1);
+
+                        if (!s_room_pages.empty())
+                        {
+                            int rooms = static_cast<int>(s_room_pages.size());
+                            if (rooms > 0)
+                            {
+                                if (s_current_room_index < 0 || s_current_room_index >= rooms)
+                                {
+                                    s_current_room_index = 0;
+                                }
+                                ui::screensaver::hide_to_room(s_room_pages[s_current_room_index].root);
+                                // Prevent the same touch from being delivered
+                                // to widgets on the newly shown room screen.
+                                lv_indev_reset(NULL, nullptr);
+                            }
+                        }
+
+                        lvgl_port_unlock();
+                    },
+                    nullptr,
+                    &inst);
+                s_wake_handler_registered = true;
+            }
+
+            if (!s_entity_handler_registered)
+            {
+                esp_event_handler_instance_t inst = nullptr;
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::ENTITY_STATE_CHANGED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
+                    {
+                        if (base != APP_EVENTS || id != app_events::ENTITY_STATE_CHANGED)
+                        {
+                            return;
+                        }
+
+                        const auto *payload = static_cast<const app_events::EntityStateChangedPayload *>(event_data);
+                        if (!payload)
+                        {
+                            return;
+                        }
+
+                        const state::Entity *ent = state::find_entity(payload->entity_id);
+                        if (!ent)
+                        {
+                            return;
+                        }
+
+                        // Reuse existing UI update logic
+                        on_entity_state_changed(*ent);
+                    },
+                    nullptr,
+                    &inst);
+                s_entity_handler_registered = true;
             }
         }
 

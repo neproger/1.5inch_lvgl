@@ -16,6 +16,20 @@ namespace input_controller
     {
         static const char *TAG = "input_controller";
 
+        enum class KnobCode
+        {
+            Right = KNOB_RIGHT,
+            Left = KNOB_LEFT,
+            HighLimit = KNOB_H_LIM,
+            LowLimit = KNOB_L_LIM,
+            Zero = KNOB_ZERO,
+        };
+
+        enum class ButtonCode
+        {
+            SingleClick = BUTTON_SINGLE_CLICK,
+        };
+
         // C entry points from devices_init.c (knob/button callbacks)
         extern "C" void LVGL_knob_event(void *event)
         {
@@ -60,12 +74,12 @@ namespace input_controller
             // Any input should wake screensaver
             (void)app_events::post_wake_screensaver(ts, false);
 
-            switch (code)
+            switch (static_cast<KnobCode>(code))
             {
-            case 0: // KNOB_RIGHT -> next room
+            case KnobCode::Right: // next room
                 (void)app_events::post_navigate_room(+1, ts, false);
                 break;
-            case 1: // KNOB_LEFT -> previous room
+            case KnobCode::Left: // previous room
                 (void)app_events::post_navigate_room(-1, ts, false);
                 break;
             default:
@@ -93,7 +107,7 @@ namespace input_controller
             (void)app_events::post_wake_screensaver(ts, false);
 
             // SINGLE_CLICK toggles current entity
-            if (code == 4)
+            if (code == static_cast<int>(ButtonCode::SingleClick))
             {
                 (void)app_events::post_toggle_current_entity(ts, false);
             }
@@ -118,13 +132,13 @@ namespace input_controller
             // Any gesture should wake screensaver
             (void)app_events::post_wake_screensaver(ts, false);
 
-            // 0 = swipe left (next room), 1 = swipe right (previous room)
-            switch (code)
+            // SwipeLeft = next room, SwipeRight = previous room
+            switch (static_cast<app_events::GestureCode>(code))
             {
-            case 0:
+            case app_events::GestureCode::SwipeLeft:
                 (void)app_events::post_navigate_room(+1, ts, false);
                 break;
-            case 1:
+            case app_events::GestureCode::SwipeRight:
                 (void)app_events::post_navigate_room(-1, ts, false);
                 break;
             default:
@@ -150,7 +164,8 @@ namespace input_controller
                 return;
             }
 
-            ui::toggle::trigger_toggle_for_entity(entity_id);
+            std::int64_t now_us = esp_timer_get_time();
+            (void)app_events::post_toggle_request(entity_id.c_str(), now_us, false);
 
             lvgl_port_unlock();
         }

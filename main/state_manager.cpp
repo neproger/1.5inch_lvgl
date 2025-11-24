@@ -1,6 +1,8 @@
 #include "state_manager.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "app/app_events.hpp"
 
 #include <unordered_map>
 #include <array>
@@ -264,6 +266,10 @@ namespace state
                 }
             }
         }
+
+        // Notify application event bus about changed entity state
+        std::int64_t now_us = esp_timer_get_time();
+        (void)app_events::post_entity_state_changed(entity_id.c_str(), now_us, false);
 
         const Entity &e = g_entities[index];
         for (const auto &cb : listeners_to_call)

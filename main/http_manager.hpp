@@ -10,10 +10,8 @@ namespace http_manager
     bool bootstrap_state();
 
     // Start periodic weather polling over HTTP.
-    // on_weather_updated is called from the polling task after state::set_weather()
-    // on successful updates; the callback must be fast and handle its own
-    // synchronization (e.g. LVGL locks) if it touches UI.
-    void start_weather_polling(void (*on_weather_updated)(void));
+    // Updates state_manager::set_weather/set_clock() on successful polls.
+    void start_weather_polling();
 
 } // namespace http_manager
 

@@ -43,7 +43,6 @@ namespace http_manager
 )json";
 
         static TaskHandle_t s_weather_task = NULL;
-        static void (*s_weather_cb)(void) = nullptr;
 
         static bool ensure_wifi_connected()
         {
@@ -256,11 +255,6 @@ namespace http_manager
 
                 state::set_weather(temp_c, cond);
                 state::set_clock(year, month, day, weekday, hour, minute, second, esp_timer_get_time());
-
-                if (s_weather_cb)
-                {
-                    s_weather_cb();
-                }
                 vTaskDelay(pdMS_TO_TICKS(50000));
             }
         }
@@ -287,9 +281,8 @@ namespace http_manager
         return false;
     }
 
-    void start_weather_polling(void (*on_weather_updated)(void))
+    void start_weather_polling()
     {
-        s_weather_cb = on_weather_updated;
         if (s_weather_task == NULL)
         {
             xTaskCreate(weather_task, "weather", 4096, NULL, 3, &s_weather_task);

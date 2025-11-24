@@ -49,22 +49,18 @@ void ui_app_init(void)
         }
     }
 
+    // Initialize toggle handling (event bus subscriptions)
+    (void)ui::toggle::init();
+
     // Attach root input handler to screensaver root for press events
     if (s_screensaver_root)
     {
         lv_obj_add_event_cb(s_screensaver_root, root_input_cb, LV_EVENT_PRESSED, nullptr);
     }
 
-    // Subscribe to entity updates and apply initial state
+    // Apply current state to widgets (bootstrap after MQTT)
     {
         const auto &ents = state::entities();
-        for (const auto &e : ents)
-        {
-            int id = state::subscribe_entity(e.id, &ui::rooms::on_entity_state_changed);
-            if (id > 0)
-                s_state_subscriptions.push_back(id);
-        }
-        // Apply current state to widgets (bootstrap after MQTT)
         for (const auto &e : ents)
         {
             ui::rooms::on_entity_state_changed(e);
@@ -101,11 +97,11 @@ static void root_input_cb(lv_event_t *e)
         int gesture_code = -1;
         if (dir == LV_DIR_LEFT)
         {
-            gesture_code = 0; // swipe left -> next room
+            gesture_code = static_cast<int>(app_events::GestureCode::SwipeLeft);
         }
         else if (dir == LV_DIR_RIGHT)
         {
-            gesture_code = 1; // swipe right -> previous room
+            gesture_code = static_cast<int>(app_events::GestureCode::SwipeRight);
         }
 
         if (gesture_code >= 0)

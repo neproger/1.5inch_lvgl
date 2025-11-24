@@ -2,12 +2,10 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
-#include "esp_event.h"
 #include "fonts.h"
 #include "http_manager.hpp"
 #include "icons.h"
 #include "state_manager.hpp"
-#include "app/app_events.hpp"
 
 namespace ui
 {
@@ -26,7 +24,6 @@ namespace ui
         static bool s_active = false;
         static const uint32_t kScreensaverTimeoutMs = 10000;
 
-        static void on_weather_updated_from_http(void);
         static void idle_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
 
@@ -92,49 +89,6 @@ namespace ui
             if (s_clock_timer == nullptr)
             {
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
-            }
-
-            // Subscribe screensaver to wake events
-            static bool s_wake_handler_registered = false;
-            if (!s_wake_handler_registered)
-            {
-                esp_event_handler_instance_t inst = nullptr;
-                (void)esp_event_handler_instance_register(
-                    APP_EVENTS,
-                    app_events::WAKE_SCREENSAVER,
-                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
-                    {
-                        if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
-                        {
-                            return;
-                        }
-
-                        lvgl_port_lock(-1);
-
-                        if (s_active)
-                        {
-                            if (!rooms::s_room_pages.empty())
-                            {
-                                int rooms = static_cast<int>(rooms::s_room_pages.size());
-                                if (rooms > 0)
-                                {
-                                    if (rooms::s_current_room_index < 0 || rooms::s_current_room_index >= rooms)
-                                    {
-                                        rooms::s_current_room_index = 0;
-                                    }
-                                    hide_to_room(rooms::s_room_pages[rooms::s_current_room_index].root);
-                                    // Prevent the same touch from being delivered
-                                    // to widgets on the newly shown room screen.
-                                    lv_indev_reset(NULL, nullptr);
-                                }
-                            }
-                        }
-
-                        lvgl_port_unlock();
-                    },
-                    nullptr,
-                    &inst);
-                s_wake_handler_registered = true;
             }
 
         }
@@ -361,14 +315,7 @@ namespace ui
 
         void start_weather_polling()
         {
-            http_manager::start_weather_polling(&on_weather_updated_from_http);
-        }
-
-        static void on_weather_updated_from_http(void)
-        {
-            lvgl_port_lock(-1);
-            ui_update_weather_and_clock();
-            lvgl_port_unlock();
+            http_manager::start_weather_polling();
         }
 
         static void idle_timer_cb(lv_timer_t *timer)

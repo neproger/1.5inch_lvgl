@@ -11,6 +11,7 @@ idf_component_register(
         "ha_mqtt.cpp"
         "app/router.cpp"
         "app/app_events.cpp"
+        "app/toggle_controller.cpp"
         "app/input_controller.cpp"
         "app/event_logger.cpp"
         "app/entities.cpp"

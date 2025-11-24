@@ -3,14 +3,9 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
-#include "app/router.hpp"
-#include "wifi_manager.h"
+#include "esp_event.h"
+#include "app/app_events.hpp"
 #include "rooms.hpp"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
-#include <cstring>
 
 namespace ui
 {
@@ -54,7 +49,6 @@ namespace ui
     namespace toggle
     {
         static const char *TAG_UI_TOGGLE = "UI_TOGGLE";
-        static TaskHandle_t s_ha_req_task = nullptr;
         static int64_t s_last_toggle_us = 0;
         static lv_obj_t *s_spinner = nullptr;
         static std::string s_pending_toggle_entity;
@@ -100,41 +94,31 @@ namespace ui
             lvgl_port_unlock();
         }
 
-        static void ha_toggle_task(void *arg)
+        static void on_toggle_result(void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
         {
-            char *entity = static_cast<char *>(arg);
-
-            s_last_toggle_us = esp_timer_get_time();
-            vTaskDelay(pdMS_TO_TICKS(200));
-
-            if (!wifi_manager_is_connected())
+            if (base != APP_EVENTS || id != app_events::TOGGLE_RESULT)
             {
-                ESP_LOGW(TAG_UI_TOGGLE, "No WiFi, cannot toggle entity");
-                if (entity)
-                    std::free(entity);
-                s_pending_toggle_entity.clear();
-                ui_set_switches_enabled(true);
-                ui_hide_spinner();
-                s_ha_req_task = nullptr;
-                vTaskDelete(nullptr);
                 return;
             }
 
-            esp_err_t err = router::toggle(entity);
-
-            if (entity)
-                std::free(entity);
-
-            if (err != ESP_OK)
+            const auto *payload = static_cast<const app_events::ToggleResultPayload *>(event_data);
+            if (!payload)
             {
-                ESP_LOGW(TAG_UI_TOGGLE, "MQTT toggle error: %d", (int)err);
+                return;
             }
 
-            s_ha_req_task = nullptr;
-            s_pending_toggle_entity.clear();
+            // Only react for current pending entity (if any)
+            if (!s_pending_toggle_entity.empty() && s_pending_toggle_entity != payload->entity_id)
+            {
+                return;
+            }
+
+            lvgl_port_lock(-1);
             ui_set_switches_enabled(true);
             ui_hide_spinner();
-            vTaskDelete(nullptr);
+            lvgl_port_unlock();
+
+            s_pending_toggle_entity.clear();
         }
 
         void trigger_toggle_for_entity(const std::string &entity_id)
@@ -150,12 +134,7 @@ namespace ui
             {
                 return;
             }
-            if (!router::is_connected())
-            {
-                ESP_LOGW(TAG_UI_TOGGLE, "No MQTT connection for toggle");
-                return;
-            }
-            if (s_ha_req_task != nullptr)
+            if (!s_pending_toggle_entity.empty())
             {
                 ESP_LOGW(TAG_UI_TOGGLE, "Toggle already in progress");
                 return;
@@ -165,30 +144,8 @@ namespace ui
             ui_set_switches_enabled(false);
             ui_show_spinner();
 
-            if (s_ha_req_task == nullptr)
-            {
-                char *arg = static_cast<char *>(std::malloc(entity_id.size() + 1));
-                if (!arg)
-                {
-                    ESP_LOGE(TAG_UI_TOGGLE, "No memory for toggle arg");
-                    s_pending_toggle_entity.clear();
-                    ui_set_switches_enabled(true);
-                    ui_hide_spinner();
-                    return;
-                }
-                std::memcpy(arg, entity_id.c_str(), entity_id.size() + 1);
-
-                BaseType_t ok = xTaskCreate(ha_toggle_task, "ha_toggle", 4096, arg, 4, &s_ha_req_task);
-                if (ok != pdPASS)
-                {
-                    std::free(arg);
-                    s_ha_req_task = nullptr;
-                    ESP_LOGW(TAG_UI_TOGGLE, "Failed to create ha_toggle task");
-                    ui_set_switches_enabled(true);
-                    s_pending_toggle_entity.clear();
-                    ui_hide_spinner();
-                }
-            }
+            s_last_toggle_us = now;
+            (void)app_events::post_toggle_request(entity_id.c_str(), now, false);
         }
 
         void switch_event_cb(lv_event_t *e)
@@ -205,7 +162,7 @@ namespace ui
                 ESP_LOGI(TAG_UI_TOGGLE, "Toggle ignored, control disabled");
                 return;
             }
-            if (s_ha_req_task != nullptr)
+            if (!s_pending_toggle_entity.empty())
             {
                 ESP_LOGI(TAG_UI_TOGGLE, "Toggle in progress, ignoring switch");
                 return;
@@ -218,6 +175,34 @@ namespace ui
             }
 
             trigger_toggle_for_entity(entity_id);
+        }
+
+        esp_err_t init()
+        {
+            static bool s_registered = false;
+            if (s_registered)
+            {
+                return ESP_OK;
+            }
+
+            esp_event_handler_instance_t inst = nullptr;
+            esp_err_t err = esp_event_handler_instance_register(
+                APP_EVENTS,
+                app_events::TOGGLE_RESULT,
+                &on_toggle_result,
+                nullptr,
+                &inst);
+
+            if (err != ESP_OK)
+            {
+                ESP_LOGW(TAG_UI_TOGGLE, "failed to register TOGGLE_RESULT handler: %s", esp_err_to_name(err));
+            }
+            else
+            {
+                s_registered = true;
+            }
+
+            return err;
         }
 
     } // namespace toggle

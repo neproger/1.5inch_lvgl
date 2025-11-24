@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include "esp_err.h"
 
 #include <string>
 
@@ -17,6 +18,9 @@ namespace ui
 
     namespace toggle
     {
+        // Initialize toggle handling (registers event bus handlers)
+        esp_err_t init();
+
         // Handle LVGL switch event and trigger toggle over HA
         void switch_event_cb(lv_event_t *e);
 

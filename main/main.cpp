@@ -16,6 +16,7 @@
 #include "app/router.hpp"
 #include "app/event_logger.hpp"
 #include "app/input_controller.hpp"
+#include "app/toggle_controller.hpp"
 
 static const char *TAG_APP = "app";
 
@@ -34,6 +35,8 @@ extern "C" void app_main(void)
 
     // Initialize application-level input mapping
     (void)input_controller::init();
+    // Initialize toggle controller (handles TOGGLE_REQUEST/RESULT)
+    (void)toggle_controller::init();
 
     // Log all events from the default ESP event loop for inspection/debugging
     (void)event_logger::init();

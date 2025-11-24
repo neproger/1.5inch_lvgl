@@ -72,6 +72,38 @@ namespace event_logger
                              "event: base=%s id=TOGGLE_CURRENT_ENTITY",
                              base_str);
                     break;
+                case app_events::ENTITY_STATE_CHANGED:
+                {
+                    auto *p = static_cast<const app_events::EntityStateChangedPayload *>(event_data);
+                    const char *id_str = (p && p->entity_id[0]) ? p->entity_id : "<null>";
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=ENTITY_STATE_CHANGED entity_id=%s",
+                             base_str,
+                             id_str);
+                    break;
+                }
+                case app_events::TOGGLE_REQUEST:
+                {
+                    auto *p = static_cast<const app_events::ToggleRequestPayload *>(event_data);
+                    const char *id_str = (p && p->entity_id[0]) ? p->entity_id : "<null>";
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=TOGGLE_REQUEST entity_id=%s",
+                             base_str,
+                             id_str);
+                    break;
+                }
+                case app_events::TOGGLE_RESULT:
+                {
+                    auto *p = static_cast<const app_events::ToggleResultPayload *>(event_data);
+                    const char *id_str = (p && p->entity_id[0]) ? p->entity_id : "<null>";
+                    bool ok = p ? p->success : false;
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=TOGGLE_RESULT entity_id=%s success=%d",
+                             base_str,
+                             id_str,
+                             (int)ok);
+                    break;
+                }
                 default:
                     ESP_LOGI(TAG,
                              "event: base=%s id=%ld (APP_EVENTS unknown)",
