@@ -55,7 +55,6 @@ namespace ui
 
         static void ui_show_spinner(void)
         {
-            lvgl_port_lock(-1);
             if (s_spinner)
             {
                 lv_obj_del(s_spinner);
@@ -65,23 +64,19 @@ namespace ui
             s_spinner = lv_spinner_create(scr);
             lv_obj_set_size(s_spinner, 24, 24);
             lv_obj_align(s_spinner, LV_ALIGN_BOTTOM_MID, 0, -10);
-            lvgl_port_unlock();
         }
 
         static void ui_hide_spinner(void)
         {
-            lvgl_port_lock(-1);
             if (s_spinner)
             {
                 lv_obj_del(s_spinner);
                 s_spinner = nullptr;
             }
-            lvgl_port_unlock();
         }
 
         static void ui_set_switches_enabled(bool enabled)
         {
-            lvgl_port_lock(-1);
             for (auto &page : ui::rooms::s_room_pages)
             {
                 for (auto &w : page.devices)
@@ -91,7 +86,6 @@ namespace ui
                     ui::controls::set_switch_enabled(w.control, enabled);
                 }
             }
-            lvgl_port_unlock();
         }
 
         static void on_toggle_result(void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)

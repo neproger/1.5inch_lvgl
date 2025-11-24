@@ -1,5 +1,5 @@
 #include "devices_init.h"
-#include "ui_app.h"
+#include "ui/ui_app.hpp"
 #include "ui/splash.hpp"
 #include "ui/screensaver.hpp"
 #include "esp_err.h"

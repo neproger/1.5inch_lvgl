@@ -1,4 +1,4 @@
-#include "ui_app.h"
+#include "ui_app.hpp"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
@@ -9,19 +9,7 @@
 #include "switch.hpp"
 #include "app/app_events.hpp"
 #include <cstdint>
-#include <cstring>
-#include <cmath>
-#include <vector>
-#include <string>
 
-static const char *TAG_UI = "UI";
-
-static std::vector<int> s_state_subscriptions;
-
-using ui::rooms::DeviceWidget;
-using ui::rooms::RoomPage;
-using ui::rooms::s_current_device_index;
-using ui::rooms::s_current_room_index;
 using ui::rooms::s_room_pages;
 using ui::rooms::ui_build_room_pages;
 using ui::screensaver::s_screensaver_root;
@@ -121,4 +109,3 @@ static void root_input_cb(lv_event_t *e)
 
 // Currently no UI-level event handlers; high-level events are handled
 // by their respective domains (screensaver, rooms, input_controller).
-
