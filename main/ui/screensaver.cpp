@@ -2,10 +2,14 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "esp_sleep.h"
+#include "esp_log.h"
+#include "driver/gpio.h"
 #include "fonts.h"
 #include "http_manager.hpp"
 #include "icons.h"
 #include "state_manager.hpp"
+#include "app/devices_init.h"
 
 namespace ui
 {
@@ -23,9 +27,11 @@ namespace ui
         static lv_timer_t *s_clock_timer = nullptr;
         static bool s_active = false;
         static const uint32_t kScreensaverTimeoutMs = 10000;
+        static const uint32_t kSleepAfterScreensaverMs = 10000;
 
         static void idle_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
+        static void enter_light_sleep();
 
         void ui_build_screensaver()
         {
@@ -337,6 +343,13 @@ namespace ui
                     show();
                 }
             }
+            else
+            {
+                if (inactive_ms >= (kScreensaverTimeoutMs + kSleepAfterScreensaverMs))
+                {
+                    enter_light_sleep();
+                }
+            }
         }
 
         static void clock_timer_cb(lv_timer_t *timer)
@@ -346,6 +359,27 @@ namespace ui
             lvgl_port_lock(-1);
             ui_update_weather_and_clock();
             lvgl_port_unlock();
+        }
+
+        static void enter_light_sleep()
+        {
+            // Turn off backlight
+            (void)devices_set_backlight_percent(0);
+
+            // Configure wakeup on user button (BOOT) using light-sleep GPIO wakeup
+            // Button is active-low, so wake on low level.
+            gpio_wakeup_enable(GPIO_NUM_0, GPIO_INTR_LOW_LEVEL);
+            esp_sleep_enable_gpio_wakeup();
+
+            ESP_LOGI("screensaver", "Entering light sleep from screensaver");
+            // Enter light sleep; will resume here after wakeup
+            esp_light_sleep_start();
+
+            // Restore backlight after wakeup
+            (void)devices_set_backlight_percent(100);
+
+            // Mark activity so screensaver does not immediately re-engage
+            lv_display_trigger_activity(nullptr);
         }
 
     } // namespace screensaver

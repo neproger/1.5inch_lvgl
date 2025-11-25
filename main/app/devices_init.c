@@ -437,3 +437,39 @@ esp_err_t devices_init(void)
     return ESP_OK;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////// Backlight control (public API) ////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+esp_err_t devices_set_backlight_raw(uint8_t level)
+{
+    if (!s_bk_ledc_inited)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint32_t duty = level;
+    esp_err_t err = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, duty);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    return ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
+}
+
+esp_err_t devices_set_backlight_percent(int percent)
+{
+    if (!s_bk_ledc_inited)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (percent < 0)
+    {
+        percent = 0;
+    }
+    if (percent > 100)
+    {
+        percent = 100;
+    }
+    uint32_t duty = (uint32_t)((percent * 255 + 50) / 100); // round to nearest
+    return devices_set_backlight_raw((uint8_t)duty);
+}
