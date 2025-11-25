@@ -13,6 +13,7 @@ idf_component_register(
         "transport/http_utils.cpp"
         "config_server/config_store.cpp"
         "config_server/config_server.cpp"
+        "config_server/config_store_c.cpp"
         "app/router.cpp"
         "app/app_events.cpp"
         "app/toggle_controller.cpp"

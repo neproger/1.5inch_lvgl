@@ -1,10 +1,12 @@
 #include <cstring>
 #include <cstdio>
+#include <string>
 #include "esp_log.h"
 #include "esp_event.h"
 #include "mqtt_client.h"
 #include "ha_mqtt.hpp"
 #include "ha_mqtt_config.h"
+#include "config_server/config_store.hpp"
 
 namespace ha_mqtt
 {
@@ -13,6 +15,12 @@ namespace ha_mqtt
     static esp_mqtt_client_handle_t s_client = nullptr;
     static volatile bool s_connected = false;
     static MessageHandler s_handler = nullptr;
+
+    // Runtime MQTT connection parameters (backed by config_store or compile-time defaults)
+    static std::string s_uri;
+    static std::string s_user;
+    static std::string s_pass;
+    static std::string s_client_id;
 
     // Simple subscription registry (re-subscribed on reconnect)
     struct sub_item_t { char topic[96]; int qos; };
@@ -73,17 +81,38 @@ namespace ha_mqtt
         if (s_client)
             return ESP_OK;
 
+        // Pick configuration: prefer NVS (config_store), fall back to compile-time.
+        config_store::HaConn ha[1];
+        std::size_t ha_count = 0;
+        if (config_store::load_ha(ha, 1, ha_count) == ESP_OK && ha_count > 0 && ha[0].host[0] != '\0')
+        {
+            const auto &c = ha[0];
+            s_uri = "mqtt://";
+            s_uri += c.host;
+            s_uri += ":";
+            s_uri += std::to_string(c.mqtt_port ? c.mqtt_port : 1883);
+            s_user = c.mqtt_username;
+            s_pass = c.mqtt_password;
+        }
+        else
+        {
+            s_uri = HA_MQTT_URI;
+            s_user = HA_MQTT_USERNAME;
+            s_pass = HA_MQTT_PASSWORD;
+        }
+        s_client_id = HA_MQTT_CLIENT_ID;
+
         esp_mqtt_client_config_t cfg = {};
-        cfg.broker.address.uri = HA_MQTT_URI;
-        if (std::strlen(HA_MQTT_USERNAME) > 0)
-            cfg.credentials.username = HA_MQTT_USERNAME;
-        if (std::strlen(HA_MQTT_PASSWORD) > 0)
-            cfg.credentials.authentication.password = HA_MQTT_PASSWORD;
+        cfg.broker.address.uri = s_uri.c_str();
+        if (!s_user.empty())
+            cfg.credentials.username = s_user.c_str();
+        if (!s_pass.empty())
+            cfg.credentials.authentication.password = s_pass.c_str();
         cfg.session.last_will.topic = HA_MQTT_STATUS_TOPIC;
         cfg.session.last_will.msg = "offline";
         cfg.session.last_will.qos = 1;
         cfg.session.last_will.retain = true;
-        cfg.credentials.client_id = HA_MQTT_CLIENT_ID;
+        cfg.credentials.client_id = s_client_id.c_str();
         cfg.task.priority = 5;
         cfg.buffer.size = 2048;
         cfg.network.reconnect_timeout_ms = 3000;

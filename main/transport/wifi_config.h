@@ -2,22 +2,21 @@
 
 #include <stddef.h>
 
-// Простой конфиг известных точек доступа.
-// Заполните SSID/PASS под себя.
+// Optional compile-time Wi-Fi list (fallback).
+// Prefer configuring networks via web UI (config_server).
 
 #define WIFI_KNOWN_AP_MAX 5
 
-typedef struct {
+typedef struct
+{
     const char *ssid;
     const char *password;
 } wifi_known_ap_t;
 
-// Пример. Меняйте по нужде. Можно добавлять/удалять записи.
+// Default list is empty; add entries here only for local testing.
 static const wifi_known_ap_t WIFI_KNOWN_APS[] = {
-    { "MERCUSYS_0348", "18188530" },
-    { "ITPod", "zxcxzzxc" },
-    { "oneplus8", "zxcxzzxc" }
-    // { "PhoneHotspot", "hotspot_password" },
+    // Example:
+    // { "MyWiFi", "password123" },
 };
 
 static const size_t WIFI_KNOWN_APS_COUNT = sizeof(WIFI_KNOWN_APS) / sizeof(WIFI_KNOWN_APS[0]);

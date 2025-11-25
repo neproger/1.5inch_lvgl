@@ -13,6 +13,7 @@
 
 #include "wifi_manager.h"
 #include "wifi_config.h"
+#include "config_server/config_store_c.h"
 
 static const char *TAG = "wifi_mgr";
 
@@ -21,6 +22,7 @@ typedef struct
 {
     EventGroupHandle_t wifi_event_group;
     esp_netif_t *netif;
+    esp_netif_t *ap_netif;
     TaskHandle_t mgr_task;
     int32_t min_rssi;
     int scan_interval_ms;
@@ -29,6 +31,7 @@ typedef struct
 static wifi_manager_state_t s_state = {
     .wifi_event_group = NULL,
     .netif = NULL,
+    .ap_netif = NULL,
     .mgr_task = NULL,
     .min_rssi = -85,
     .scan_interval_ms = 15000,
@@ -135,7 +138,19 @@ esp_err_t wifi_manager_init(void)
     return ESP_OK;
 }
 
-static int find_known_index(const char *ssid)
+static int find_known_index_config(const char *ssid, const config_store_wifi_ap_t *aps, size_t count)
+{
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (strcmp(aps[i].ssid, ssid) == 0)
+        {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int find_known_index_static(const char *ssid)
 {
     for (size_t i = 0; i < WIFI_KNOWN_APS_COUNT; ++i)
     {
@@ -149,9 +164,22 @@ static int find_known_index(const char *ssid)
 
 esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
 {
-    if (WIFI_KNOWN_APS_COUNT == 0)
+    config_store_wifi_ap_t cfg_aps[WIFI_KNOWN_AP_MAX];
+    size_t cfg_count = 0;
+    bool use_cfg = false;
+
+    if (config_store_load_wifi_c(cfg_aps, WIFI_KNOWN_AP_MAX, &cfg_count) == ESP_OK && cfg_count > 0)
     {
-        ESP_LOGW(TAG, "No known APs configured");
+        use_cfg = true;
+        ESP_LOGI(TAG, "Using %u Wi-Fi APs from config_store", (unsigned)cfg_count);
+    }
+    else if (WIFI_KNOWN_APS_COUNT > 0)
+    {
+        ESP_LOGI(TAG, "Using compile-time Wi-Fi AP list");
+    }
+    else
+    {
+        ESP_LOGW(TAG, "No known APs configured (config_store and wifi_config empty)");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -194,7 +222,15 @@ esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
 
     for (int i = 0; i < ap_num; ++i)
     {
-        int known_idx = find_known_index((const char *)list[i].ssid);
+        int known_idx = -1;
+        if (use_cfg)
+        {
+            known_idx = find_known_index_config((const char *)list[i].ssid, cfg_aps, cfg_count);
+        }
+        else
+        {
+            known_idx = find_known_index_static((const char *)list[i].ssid);
+        }
         if (known_idx >= 0)
         {
             ESP_LOGI(TAG, "Seen known AP '%s' RSSI=%d", list[i].ssid, list[i].rssi);
@@ -224,7 +260,15 @@ esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
     wifi_config_t cfg = {0};
     strncpy((char *)cfg.sta.ssid, (const char *)list[best_idx_in_list].ssid, sizeof(cfg.sta.ssid));
     cfg.sta.ssid[sizeof(cfg.sta.ssid) - 1] = '\0';
-    strncpy((char *)cfg.sta.password, WIFI_KNOWN_APS[best_known_idx].password, sizeof(cfg.sta.password));
+
+    if (use_cfg)
+    {
+        strncpy((char *)cfg.sta.password, cfg_aps[best_known_idx].password, sizeof(cfg.sta.password));
+    }
+    else
+    {
+        strncpy((char *)cfg.sta.password, WIFI_KNOWN_APS[best_known_idx].password, sizeof(cfg.sta.password));
+    }
     cfg.sta.password[sizeof(cfg.sta.password) - 1] = '\0';
 
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // reasonable default; will still connect to stronger auth
@@ -297,3 +341,51 @@ void wifi_manager_start_auto(int32_t min_rssi, int scan_interval_ms)
     }
 }
 
+esp_err_t wifi_manager_start_ap_config(const char *ssid, const char *password)
+{
+    if (!ssid || !*ssid)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_state.netif)
+    {
+        ESP_LOGE(TAG, "WiFi not initialized, call wifi_manager_init() first");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!s_state.ap_netif)
+    {
+        s_state.ap_netif = esp_netif_create_default_wifi_ap();
+        if (!s_state.ap_netif)
+        {
+            ESP_LOGE(TAG, "Failed to create AP netif");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    wifi_config_t cfg = {0};
+    strncpy((char *)cfg.ap.ssid, ssid, sizeof(cfg.ap.ssid));
+    cfg.ap.ssid[sizeof(cfg.ap.ssid) - 1] = '\0';
+    cfg.ap.ssid_len = (uint8_t)strlen((const char *)cfg.ap.ssid);
+
+    if (password && *password)
+    {
+        strncpy((char *)cfg.ap.password, password, sizeof(cfg.ap.password));
+        cfg.ap.password[sizeof(cfg.ap.password) - 1] = '\0';
+        cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    }
+    else
+    {
+        cfg.ap.authmode = WIFI_AUTH_OPEN;
+    }
+
+    cfg.ap.max_connection = 4;
+    cfg.ap.channel = 1;
+
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_AP), TAG, "esp_wifi_set_mode(AP) failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &cfg), TAG, "esp_wifi_set_config(AP) failed");
+
+    ESP_LOGI(TAG, "AP config started, SSID='%s'", cfg.ap.ssid);
+    return ESP_OK;
+}

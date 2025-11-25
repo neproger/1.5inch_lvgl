@@ -3,6 +3,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
+#include "esp_check.h"
 
 namespace config_store
 {
@@ -137,4 +138,3 @@ namespace config_store
     }
 
 } // namespace config_store
-

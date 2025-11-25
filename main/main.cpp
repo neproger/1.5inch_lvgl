@@ -18,7 +18,22 @@
 #include "app/input_controller.hpp"
 #include "app/toggle_controller.hpp"
 
+#include "config_server/config_store.hpp"
+#include "config_server/config_server.hpp"
+
 static const char *TAG_APP = "app";
+
+static void enter_config_mode()
+{
+    // Start configuration access point + HTTP UI and park main task.
+    (void)wifi_manager_start_ap_config("esp32-ha-setup", nullptr);
+    (void)config_server::start();
+    ESP_LOGI(TAG_APP, "Config mode: AP 'esp32-ha-setup' with HTTP config server");
+    for (;;)
+    {
+        vTaskDelay(portMAX_DELAY);
+    }
+}
 
 extern "C" void app_main(void)
 {
@@ -26,6 +41,15 @@ extern "C" void app_main(void)
     {
         ESP_LOGE(TAG_APP, "WiFi manager init failed");
         return;
+    }
+
+    // Initialize config store (NVS backed).
+    (void)config_store::init();
+
+    if (!config_store::has_basic_config())
+    {
+        // No Wi‑Fi/HA config stored: enter setup mode.
+        enter_config_mode();
     }
 
     if (devices_init() != ESP_OK)
@@ -49,8 +73,8 @@ extern "C" void app_main(void)
 
     if (!http_manager::bootstrap_state())
     {
-        ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, stopping init");
-        return;
+        ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, entering config mode");
+        enter_config_mode();
     }
 
     lvgl_port_lock(0);

@@ -12,7 +12,7 @@
 #endif
 
 // If your endpoint requires Bearer auth, put the long token here.
-// Leave empty ("") if no Authorization header is needed.
+// Runtime token is normally provided via config_store; this is only a fallback.
 #ifndef HA_HTTP_BEARER_TOKEN
-#define HA_HTTP_BEARER_TOKEN "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiIyYTRmMDczZTVkMmI0ZWQ5ODhkYTE4NTVmZjc2NGVmOCIsImlhdCI6MTc2MzIwMDYzMiwiZXhwIjoyMDc4NTYwNjMyfQ.ogO8DhTWIcAu4P8E_wuWGL4BF3d-380QMHw2dOxOJNU"
+#define HA_HTTP_BEARER_TOKEN ""
 #endif

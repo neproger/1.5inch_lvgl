@@ -13,9 +13,11 @@ extern "C"
     esp_err_t wifi_manager_connect_best_known(int32_t min_rssi);
     bool wifi_manager_wait_ip(int wait_ms);
     void wifi_manager_start_auto(int32_t min_rssi, int scan_interval_ms);
+
+    // Start access point for configuration (AP-only mode).
+    esp_err_t wifi_manager_start_ap_config(const char *ssid, const char *password);
     bool wifi_manager_is_connected(void);
 
 #ifdef __cplusplus
 }
 #endif
-

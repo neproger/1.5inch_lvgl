@@ -10,6 +10,7 @@
 #include "http_utils.h"
 #include "ha_http_config.h"
 #include "state_manager.hpp"
+#include "config_server/config_store.hpp"
 
 #include <cstring>
 #include <string>
@@ -23,9 +24,50 @@ namespace http_manager
 
         static const char *TAG = "http_mgr";
 
-        // Bootstrap template (areas/entities).
-        static constexpr const char *kBootstrapUrl = HA_HTTP_BOOTSTRAP_URL;
-        static constexpr const char *kBootstrapToken = HA_HTTP_BEARER_TOKEN;
+        struct HaHttpConfig
+        {
+            std::string url;
+            std::string token;
+        };
+
+        static HaHttpConfig get_http_config()
+        {
+            config_store::HaConn conns[1];
+            std::size_t count = 0;
+            if (config_store::load_ha(conns, 1, count) == ESP_OK && count > 0 && conns[0].host[0] != '\0')
+            {
+                const auto &c = conns[0];
+                HaHttpConfig cfg;
+                std::string host = c.host;
+                if (host.rfind("http://", 0) == 0 || host.rfind("https://", 0) == 0)
+                {
+                    cfg.url = host;
+                }
+                else
+                {
+                    cfg.url = "http://";
+                    cfg.url += host;
+                }
+                if (c.http_port != 0)
+                {
+                    cfg.url += ":";
+                    cfg.url += std::to_string(c.http_port);
+                }
+                // Always use /api/template for bootstrap and weather
+                if (cfg.url.find("/api/template") == std::string::npos)
+                {
+                    cfg.url += "/api/template";
+                }
+                cfg.token = c.http_token;
+                return cfg;
+            }
+
+            // Fallback to compile-time config
+            HaHttpConfig cfg;
+            cfg.url = HA_HTTP_BOOTSTRAP_URL;
+            cfg.token = HA_HTTP_BEARER_TOKEN;
+            return cfg;
+        }
 
         static const char *kBootstrapTemplateBody = R"json(
 {
@@ -34,8 +76,6 @@ namespace http_manager
 )json";
 
         // Weather template (used by screensaver).
-        static constexpr const char *kWeatherUrl = HA_HTTP_BOOTSTRAP_URL;
-        static constexpr const char *kWeatherToken = HA_HTTP_BEARER_TOKEN;
         static const char *kWeatherTemplateBody = R"json(
 {
   "template": "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"
@@ -68,10 +108,11 @@ namespace http_manager
 
         static bool perform_bootstrap_request()
         {
+            HaHttpConfig cfg = get_http_config();
             char buf[2048];
             int status = 0;
-            const char *token = (kBootstrapToken && kBootstrapToken[0]) ? kBootstrapToken : nullptr;
-            esp_err_t err = http_send("POST", kBootstrapUrl, kBootstrapTemplateBody, "application/json", token, buf, sizeof(buf), &status);
+            const char *token = (!cfg.token.empty() && cfg.token[0]) ? cfg.token.c_str() : nullptr;
+            esp_err_t err = http_send("POST", cfg.url.c_str(), kBootstrapTemplateBody, "application/json", token, buf, sizeof(buf), &status);
             if (err != ESP_OK)
             {
                 ESP_LOGW(TAG, "Bootstrap HTTP error: %s", esp_err_to_name(err));
@@ -228,9 +269,10 @@ namespace http_manager
                     continue;
                 }
 
+                HaHttpConfig cfg = get_http_config();
                 int status = 0;
-                const char *token = (kWeatherToken && kWeatherToken[0]) ? kWeatherToken : nullptr;
-                esp_err_t err = http_send("POST", kWeatherUrl, kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
+                const char *token = (!cfg.token.empty() && cfg.token[0]) ? cfg.token.c_str() : nullptr;
+                esp_err_t err = http_send("POST", cfg.url.c_str(), kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
                 if (err != ESP_OK)
                 {
                     ESP_LOGW(TAG, "Weather HTTP error: %s", esp_err_to_name(err));

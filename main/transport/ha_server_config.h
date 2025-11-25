@@ -1,13 +1,10 @@
 #pragma once
 
-// Shared Home Assistant server configuration (IP/host + ports).
-// Override these via build flags or other headers before including if needed.
+// Shared Home Assistant server configuration (fallback IP/host + ports).
+// Runtime values are taken from config_store (web UI); these are only defaults.
 
 #ifndef HA_SERVER_HOST
-// Default HA/test broker host/IP //192.168.153.81
-#define HA_SERVER_HOST1 "192.168.153.81"
-#define HA_SERVER_HOST "192.168.0.105"
-#define HA_SERVER_HOST2 "192.168.1.185"
+#define HA_SERVER_HOST "192.168.1.100"
 #endif
 
 // HTTP port used for /api/template

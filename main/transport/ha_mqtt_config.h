@@ -15,13 +15,14 @@
 #define HA_MQTT_URI "mqtt://" HA_SERVER_HOST ":" HA_MQTT_PORT
 #endif
 
-// If your broker requires authentication, set these; empty means no auth in URI
+// If your broker requires authentication, set these; empty means no auth in URI.
+// Runtime credentials are normally provided via config_store; these are only fallbacks.
 #ifndef HA_MQTT_USERNAME
-#define HA_MQTT_USERNAME "mqtt_user"
+#define HA_MQTT_USERNAME ""
 #endif
 
 #ifndef HA_MQTT_PASSWORD
-#define HA_MQTT_PASSWORD "mqtt_user_123"
+#define HA_MQTT_PASSWORD ""
 #endif
 
 // Client identity and base topics

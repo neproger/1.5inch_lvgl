@@ -1,135 +1,223 @@
-async function loadConfig() {
-  const res = await fetch("/api/config");
-  if (!res.ok) {
-    throw new Error("Failed to load config");
-  }
-  return await res.json();
+// Minimal ES5-compatible config UI logic (no async/await, no arrow functions, no template literals)
+console.log("HA WEB SERVER");
+
+function loadConfig(callback) {
+  var xhr = new XMLHttpRequest();
+  xhr.open("GET", "/api/config", true);
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) {
+      return;
+    }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        var data = JSON.parse(xhr.responseText || "{}");
+        callback(null, data);
+      } catch (e) {
+        callback(e);
+      }
+    } else {
+      callback(new Error("HTTP " + xhr.status));
+    }
+  };
+  xhr.send();
 }
 
 function createWifiRow(item) {
-  const div = document.createElement("div");
+  var div = document.createElement("div");
   div.className = "row wifi-row";
 
-  div.innerHTML = `
-    <label>SSID
-      <input type="text" name="ssid" value="${item?.ssid || ""}">
-    </label>
-    <label>Password
-      <input type="text" name="password" value="${item?.password || ""}">
-    </label>
-    <button type="button" class="danger wifi-remove">Remove</button>
-  `;
+  var ssid = item && item.ssid ? item.ssid : "";
+  var password = item && item.password ? item.password : "";
 
-  div.querySelector(".wifi-remove").addEventListener("click", () => {
-    div.remove();
+  div.innerHTML =
+    '<label>SSID' +
+    '<input type="text" name="ssid" value="' + ssid + '">' +
+    "</label>" +
+    '<label>Password' +
+    '<input type="text" name="password" value="' + password + '">' +
+    "</label>" +
+    '<button type="button" class="danger wifi-remove">Remove</button>';
+
+  var btn = div.querySelector(".wifi-remove");
+  btn.addEventListener("click", function () {
+    div.parentNode.removeChild(div);
   });
 
   return div;
 }
 
 function createHaRow(item) {
-  const div = document.createElement("div");
+  var div = document.createElement("div");
   div.className = "row ha-row";
 
-  div.innerHTML = `
-    <label>Host
-      <input type="text" name="host" value="${item?.host || ""}">
-    </label>
-    <label>HTTP port
-      <input type="number" name="http_port" value="${item?.http_port || 8123}">
-    </label>
-    <label>MQTT port
-      <input type="number" name="mqtt_port" value="${item?.mqtt_port || 1883}">
-    </label>
-    <label>MQTT username
-      <input type="text" name="mqtt_username" value="${item?.mqtt_username || ""}">
-    </label>
-    <label>MQTT password
-      <input type="text" name="mqtt_password" value="${item?.mqtt_password || ""}">
-    </label>
-    <label>HTTP token
-      <input type="text" name="http_token" value="${item?.http_token || ""}">
-    </label>
-    <button type="button" class="danger ha-remove">Remove</button>
-  `;
+  var host = item && item.host ? item.host : "";
+  var httpPort = item && item.http_port ? item.http_port : 8123;
+  var mqttPort = item && item.mqtt_port ? item.mqtt_port : 1883;
+  var mqttUser = item && item.mqtt_username ? item.mqtt_username : "";
+  var mqttPass = item && item.mqtt_password ? item.mqtt_password : "";
+  var httpToken = item && item.http_token ? item.http_token : "";
 
-  div.querySelector(".ha-remove").addEventListener("click", () => {
-    div.remove();
+  div.innerHTML =
+    '<label>Host' +
+    '<input type="text" name="host" value="' + host + '">' +
+    "</label>" +
+    '<label>HTTP port' +
+    '<input type="number" name="http_port" value="' + httpPort + '">' +
+    "</label>" +
+    '<label>MQTT port' +
+    '<input type="number" name="mqtt_port" value="' + mqttPort + '">' +
+    "</label>" +
+    '<label>MQTT username' +
+    '<input type="text" name="mqtt_username" value="' + mqttUser + '">' +
+    "</label>" +
+    '<label>MQTT password' +
+    '<input type="text" name="mqtt_password" value="' + mqttPass + '">' +
+    "</label>" +
+    '<label>HTTP token' +
+    '<input type="text" name="http_token" value="' + httpToken + '">' +
+    "</label>" +
+    '<button type="button" class="danger ha-remove">Remove</button>';
+
+  var btn = div.querySelector(".ha-remove");
+  btn.addEventListener("click", function () {
+    div.parentNode.removeChild(div);
   });
 
   return div;
 }
 
 function collectConfig() {
-  const wifi = [];
-  document.querySelectorAll(".wifi-row").forEach((row) => {
-    const ssid = row.querySelector('input[name="ssid"]').value.trim();
-    const password = row.querySelector('input[name="password"]').value.trim();
+  var wifi = [];
+  var wifiRows = document.querySelectorAll(".wifi-row");
+  for (var i = 0; i < wifiRows.length; i++) {
+    var row = wifiRows[i];
+    var ssid = row.querySelector('input[name="ssid"]').value.trim();
+    var password = row.querySelector('input[name="password"]').value.trim();
     if (ssid) {
-      wifi.push({ ssid, password });
+      wifi.push({ ssid: ssid, password: password });
     }
-  });
+  }
 
-  const ha = [];
-  document.querySelectorAll(".ha-row").forEach((row) => {
-    const host = row.querySelector('input[name="host"]').value.trim();
-    const http_port = parseInt(row.querySelector('input[name="http_port"]').value, 10) || 8123;
-    const mqtt_port = parseInt(row.querySelector('input[name="mqtt_port"]').value, 10) || 1883;
-    const mqtt_username = row.querySelector('input[name="mqtt_username"]').value.trim();
-    const mqtt_password = row.querySelector('input[name="mqtt_password"]').value.trim();
-    const http_token = row.querySelector('input[name="http_token"]').value.trim();
+  var ha = [];
+  var haRows = document.querySelectorAll(".ha-row");
+  for (var j = 0; j < haRows.length; j++) {
+    var rowHa = haRows[j];
+    var host = rowHa.querySelector('input[name="host"]').value.trim();
+    var httpPort = parseInt(
+      rowHa.querySelector('input[name="http_port"]').value,
+      10
+    );
+    var mqttPort = parseInt(
+      rowHa.querySelector('input[name="mqtt_port"]').value,
+      10
+    );
+    var mqttUser = rowHa
+      .querySelector('input[name="mqtt_username"]')
+      .value.trim();
+    var mqttPass = rowHa
+      .querySelector('input[name="mqtt_password"]')
+      .value.trim();
+    var httpToken = rowHa
+      .querySelector('input[name="http_token"]')
+      .value.trim();
+
     if (host) {
-      ha.push({ host, http_port, mqtt_port, mqtt_username, mqtt_password, http_token });
+      ha.push({
+        host: host,
+        http_port: isNaN(httpPort) ? 8123 : httpPort,
+        mqtt_port: isNaN(mqttPort) ? 1883 : mqttPort,
+        mqtt_username: mqttUser,
+        mqtt_password: mqttPass,
+        http_token: httpToken,
+      });
+    }
+  }
+
+  return { wifi: wifi, ha: ha };
+}
+
+function saveConfig() {
+  var status = document.getElementById("status");
+  status.textContent = "Saving...";
+  var payload = collectConfig();
+
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/config", true);
+  xhr.setRequestHeader("Content-Type", "application/json");
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState !== 4) {
+      return;
+    }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      status.textContent = "Saved. You may reboot the device.";
+    } else {
+      status.textContent = "Save failed";
+    }
+  };
+  xhr.send(JSON.stringify(payload));
+}
+
+function sendReboot() {
+  var status = document.getElementById("status");
+  status.textContent = "Rebooting...";
+
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/reboot", true);
+  xhr.onreadystatechange = function () {
+    // Device will likely reboot immediately after responding.
+  };
+  xhr.send();
+}
+
+function main() {
+  var wifiList = document.getElementById("wifi-list");
+  var haList = document.getElementById("ha-list");
+
+  document
+    .getElementById("wifi-add")
+    .addEventListener("click", function () {
+      wifiList.appendChild(createWifiRow());
+    });
+
+  document
+    .getElementById("ha-add")
+    .addEventListener("click", function () {
+      haList.appendChild(createHaRow());
+    });
+
+  document
+    .getElementById("save")
+    .addEventListener("click", function () {
+      saveConfig();
+    });
+
+  document
+    .getElementById("reboot")
+    .addEventListener("click", function () {
+      sendReboot();
+    });
+
+  loadConfig(function (err, cfg) {
+    if (err) {
+      console.log("Failed to load config:", err);
+      var status = document.getElementById("status");
+      status.textContent = "Failed to load config";
+      return;
+    }
+    cfg = cfg || {};
+    var wifi = cfg.wifi || [];
+    var ha = cfg.ha || [];
+
+    for (var i = 0; i < wifi.length; i++) {
+      wifiList.appendChild(createWifiRow(wifi[i]));
+    }
+    for (var j = 0; j < ha.length; j++) {
+      haList.appendChild(createHaRow(ha[j]));
     }
   });
-
-  return { wifi, ha };
 }
 
-async function saveConfig() {
-  const status = document.getElementById("status");
-  status.textContent = "Saving…";
-  const payload = collectConfig();
-  const res = await fetch("/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    status.textContent = "Save failed";
-    return;
-  }
-  status.textContent = "Saved. You may reboot the device.";
-}
-
-async function main() {
-  const wifiList = document.getElementById("wifi-list");
-  const haList = document.getElementById("ha-list");
-
-  document.getElementById("wifi-add").addEventListener("click", () => {
-    wifiList.appendChild(createWifiRow());
-  });
-  document.getElementById("ha-add").addEventListener("click", () => {
-    haList.appendChild(createHaRow());
-  });
-  document.getElementById("save").addEventListener("click", () => {
-    saveConfig().catch((e) => {
-      console.error(e);
-      document.getElementById("status").textContent = "Save failed";
-    });
-  });
-
-  try {
-    const cfg = await loadConfig();
-    (cfg.wifi || []).forEach((w) => wifiList.appendChild(createWifiRow(w)));
-    (cfg.ha || []).forEach((h) => haList.appendChild(createHaRow(h)));
-  } catch (e) {
-    console.error(e);
-    document.getElementById("status").textContent = "Failed to load config";
-  }
-}
-
-window.addEventListener("DOMContentLoaded", () => {
-  main().catch((e) => console.error(e));
+document.addEventListener("DOMContentLoaded", function () {
+  main();
 });
 
