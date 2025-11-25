@@ -70,6 +70,5 @@ idf_component_register(
         mqtt
     EMBED_TXTFILES
         "config_server/www/index.html"
-        "config_server/www/app.js"
         "config_server/www/style.css"
 )

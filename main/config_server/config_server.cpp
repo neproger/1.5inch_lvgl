@@ -21,9 +21,6 @@ namespace config_server
         extern const unsigned char index_html_start[] asm("_binary_index_html_start");
         extern const unsigned char index_html_end[] asm("_binary_index_html_end");
 
-        extern const unsigned char app_js_start[] asm("_binary_app_js_start");
-        extern const unsigned char app_js_end[] asm("_binary_app_js_end");
-
         extern const unsigned char style_css_start[] asm("_binary_style_css_start");
         extern const unsigned char style_css_end[] asm("_binary_style_css_end");
 
@@ -42,14 +39,6 @@ namespace config_server
                                index_html_start,
                                index_html_end,
                                "text/html");
-        }
-
-        esp_err_t handle_app_js(httpd_req_t *req)
-        {
-            return send_static(req,
-                               app_js_start,
-                               app_js_end,
-                               "application/javascript");
         }
 
         esp_err_t handle_style_css(httpd_req_t *req)
@@ -274,14 +263,6 @@ namespace config_server
             .user_ctx = nullptr,
         };
         httpd_register_uri_handler(s_httpd, &root);
-
-        httpd_uri_t js = {
-            .uri = "/app.js",
-            .method = HTTP_GET,
-            .handler = handle_app_js,
-            .user_ctx = nullptr,
-        };
-        httpd_register_uri_handler(s_httpd, &js);
 
         httpd_uri_t css = {
             .uri = "/style.css",
