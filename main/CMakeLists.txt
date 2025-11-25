@@ -11,6 +11,8 @@ idf_component_register(
         "transport/ha_mqtt.cpp"
         "transport/http_manager.cpp"
         "transport/http_utils.cpp"
+        "config_server/config_store.cpp"
+        "config_server/config_server.cpp"
         "app/router.cpp"
         "app/app_events.cpp"
         "app/toggle_controller.cpp"
@@ -46,6 +48,7 @@ idf_component_register(
         "transport"
         "../fonts"
         "../icons"
+        "config_server"
     REQUIRES
         freertos
         esp_timer
@@ -55,6 +58,7 @@ idf_component_register(
         esp_event
         esp_netif
         nvs_flash
+        esp_http_server
         driver
         esp_lcd
         esp_lcd_touch
@@ -63,4 +67,8 @@ idf_component_register(
         esp_lvgl_port
         json
         mqtt
+    EMBED_TXTFILES
+        "config_server/www/index.html"
+        "config_server/www/app.js"
+        "config_server/www/style.css"
 )

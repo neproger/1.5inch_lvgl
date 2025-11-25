@@ -42,7 +42,7 @@ namespace http_manager
 }
 )json";
 
-        static TaskHandle_t s_weather_task = NULL;
+        static TaskHandle_t s_weather_task = nullptr;
 
         static bool ensure_wifi_connected()
         {
@@ -217,10 +217,14 @@ namespace http_manager
             (void)arg;
             char buf[256];
 
+            const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(5000);
+            const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(50000);
+
             for (;;)
             {
                 if (!wifi_manager_is_connected())
                 {
+                    vTaskDelay(kErrorDelayTicks);
                     continue;
                 }
 
@@ -230,11 +234,13 @@ namespace http_manager
                 if (err != ESP_OK)
                 {
                     ESP_LOGW(TAG, "Weather HTTP error: %s", esp_err_to_name(err));
+                    vTaskDelay(kErrorDelayTicks);
                     continue;
                 }
                 if (status < 200 || status >= 300)
                 {
                     ESP_LOGW(TAG, "Weather HTTP status %d", status);
+                    vTaskDelay(kErrorDelayTicks);
                     continue;
                 }
 
@@ -247,15 +253,25 @@ namespace http_manager
                 int hour = 0;
                 int minute = 0;
                 int second = 0;
-                if (!parse_weather_csv(buf, temp_c, cond, year, month, day, weekday, hour, minute, second))
+                if (!parse_weather_csv(buf,
+                                       temp_c,
+                                       cond,
+                                       year,
+                                       month,
+                                       day,
+                                       weekday,
+                                       hour,
+                                       minute,
+                                       second))
                 {
                     ESP_LOGW(TAG, "Failed to parse weather CSV");
+                    vTaskDelay(kErrorDelayTicks);
                     continue;
                 }
 
                 state::set_weather(temp_c, cond);
                 state::set_clock(year, month, day, weekday, hour, minute, second, esp_timer_get_time());
-                vTaskDelay(pdMS_TO_TICKS(50000));
+                vTaskDelay(kPollIntervalTicks);
             }
         }
 
@@ -283,9 +299,9 @@ namespace http_manager
 
     void start_weather_polling()
     {
-        if (s_weather_task == NULL)
+        if (s_weather_task == nullptr)
         {
-            xTaskCreate(weather_task, "weather", 4096, NULL, 3, &s_weather_task);
+            xTaskCreate(weather_task, "weather", 4096, nullptr, 3, &s_weather_task);
         }
     }
 

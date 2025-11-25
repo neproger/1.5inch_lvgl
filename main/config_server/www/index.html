@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Device Configuration</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+
+<body>
+  <main>
+    <h1>ESP32 Home Assistant Panel</h1>
+
+    <section>
+      <h2>Wi‑Fi Networks</h2>
+      <div id="wifi-list"></div>
+      <button id="wifi-add">Add Wi‑Fi</button>
+    </section>
+
+    <section>
+      <h2>Home Assistant Connections</h2>
+      <div id="ha-list"></div>
+      <button id="ha-add">Add HA Host</button>
+    </section>
+
+    <button id="save">Save configuration</button>
+    <div id="status"></div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+
+</html>
+

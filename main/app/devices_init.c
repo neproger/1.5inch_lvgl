@@ -63,52 +63,53 @@ static void sh8601_lvgl_rounder_cb(lv_event_t *e)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Hardware configuration ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define EXAMPLE_LCD_HOST (SPI2_HOST)                         // SPI‑хост, к которому подключен дисплей
-#define EXAMPLE_LCD_BITS_PER_PIXEL (16)                      // глубина цвета кадра в битах на пиксель
-#define EXAMPLE_LCD_DRAW_BUFF_DOUBLE (0)                     // 1 – двойной буфер LVGL, 0 – один буфер
-#define EXAMPLE_LCD_LVGL_AVOID_TEAR (1)                      // включить режим LVGL для уменьшения «разрыва» кадра (tearing)
+/* LCD and SPI bus */
+#define LCD_HOST (SPI2_HOST)                    // SPI host used by the display
+#define LCD_DRAW_BUFF_DOUBLE (0)                // 1 – LVGL double buffering, 0 – single buffer
+#define LCD_LVGL_AVOID_TEAR (1)                 // Enable LVGL anti‑tearing mode
 // Reduce LVGL draw buffer height to save RAM on ESP32
-#define EXAMPLE_LCD_DRAW_BUFF_HEIGHT (80)                    // высота буфера отрисовки LVGL в линиях
+#define LCD_DRAW_BUFF_HEIGHT (80)               // LVGL draw buffer height in lines
 /* Practical SPI/QSPI settings to avoid visual artifacts/tearing */
-#define EXAMPLE_LCD_SPI_SPEED_MHZ (26)                       // частота SPI к дисплею в МГц (26 МГц стабильнее, чем 40 МГц)
-#define EXAMPLE_LCD_TRANS_QUEUE_DEPTH (1)                    // максимальное число одновременно висящих SPI‑транзакций
-#define EXAMPLE_LCD_BK_LIGHT_ON_LEVEL 1                      // логический уровень GPIO для включения подсветки
-#define EXAMPLE_LCD_BK_LIGHT_OFF_LEVEL !EXAMPLE_LCD_BK_LIGHT_ON_LEVEL // логический уровень для выключения подсветки
-#define EXAMPLE_PIN_NUM_LCD_CS (GPIO_NUM_12)                 // GPIO для линии CS дисплея
-#define EXAMPLE_PIN_NUM_LCD_PCLK (GPIO_NUM_10)               // GPIO для PCLK/SCK дисплея
-#define EXAMPLE_PIN_NUM_LCD_DATA0 (GPIO_NUM_13)              // основной MOSI / D0 линии данных дисплея
-#define EXAMPLE_PIN_NUM_LCD_DATA1 (GPIO_NUM_11)              // доп. линия данных D1 (QSPI)
-#define EXAMPLE_PIN_NUM_LCD_DATA2 (GPIO_NUM_14)              // доп. линия данных D2 (QSPI)
-#define EXAMPLE_PIN_NUM_LCD_DATA3 (GPIO_NUM_9)               // доп. линия данных D3 (QSPI)
-#define EXAMPLE_PIN_NUM_LCD_RST (GPIO_NUM_8)                 // GPIO для сигнала сброса дисплея
-#define EXAMPLE_PIN_NUM_BK_LIGHT (GPIO_NUM_17)               // GPIO управления подсветкой (через LEDC/PWM)
+#define LCD_SPI_SPEED_MHZ (26)                  // SPI clock to the display (26 MHz is more stable than 40 MHz)
+#define LCD_TRANS_QUEUE_DEPTH (1)               // Maximum number of queued SPI transactions
+#define LCD_BK_LIGHT_ON_LEVEL 1                 // GPIO level to turn backlight on
+#define LCD_BK_LIGHT_OFF_LEVEL (!LCD_BK_LIGHT_ON_LEVEL) // GPIO level to turn backlight off
+#define PIN_LCD_CS (GPIO_NUM_12)                // LCD chip‑select GPIO
+#define PIN_LCD_PCLK (GPIO_NUM_10)              // LCD PCLK/SCK GPIO
+#define PIN_LCD_DATA0 (GPIO_NUM_13)             // LCD MOSI / D0 data line
+#define PIN_LCD_DATA1 (GPIO_NUM_11)             // LCD D1 data line (QSPI)
+#define PIN_LCD_DATA2 (GPIO_NUM_14)             // LCD D2 data line (QSPI)
+#define PIN_LCD_DATA3 (GPIO_NUM_9)              // LCD D3 data line (QSPI)
+#define PIN_LCD_RST (GPIO_NUM_8)                // LCD reset GPIO
+#define PIN_BK_LIGHT (GPIO_NUM_17)              // Backlight control GPIO (via LEDC/PWM)
 
-#define EXAMPLE_LCD_H_RES 478                                // горизонтальное разрешение дисплея, пикселей
-#define EXAMPLE_LCD_V_RES 466                                // вертикальное разрешение дисплея, пикселей
+#define LCD_H_RES 478                           // Horizontal resolution in pixels
+#define LCD_V_RES 466                           // Vertical resolution in pixels
 
 #if CONFIG_LV_COLOR_DEPTH == 32
 #define LCD_BIT_PER_PIXEL (24)
 #elif CONFIG_LV_COLOR_DEPTH == 16
 #define LCD_BIT_PER_PIXEL (16)
+#else
+#define LCD_BIT_PER_PIXEL (16)
 #endif
 
 /* Touch */
-#define EXAMPLE_TOUCH_HOST (I2C_NUM_0)                       // I2C‑хост, к которому подключен тач‑контроллер
-#define EXAMPLE_TOUCH_I2C_NUM (0)                            // номер I2C‑порта в драйвере ESP‑IDF
-#define EXAMPLE_TOUCH_I2C_CLK_HZ (100000)                    // частота шины I2C для тачскрина (понижена для стабильности)
-#define EXAMPLE_PIN_NUM_TOUCH_SCL (GPIO_NUM_3)               // GPIO линии SCL тач‑контроллера
-#define EXAMPLE_PIN_NUM_TOUCH_SDA (GPIO_NUM_1)               // GPIO линии SDA тач‑контроллера
-#define EXAMPLE_PIN_NUM_TOUCH_RST (GPIO_NUM_2)               // GPIO сброса тач‑контроллера
-#define EXAMPLE_PIN_NUM_TOUCH_INT (GPIO_NUM_4)               // GPIO прерывания INT от тач‑контроллера
+#define TOUCH_I2C_NUM (0)                       // I2C port index in ESP‑IDF driver
+#define TOUCH_I2C_CLK_HZ (100000)               // I2C bus speed for touch controller
+#define PIN_TOUCH_SCL (GPIO_NUM_3)              // Touch controller SCL line
+#define PIN_TOUCH_SDA (GPIO_NUM_1)              // Touch controller SDA line
+#define PIN_TOUCH_RST (GPIO_NUM_2)              // Touch controller reset GPIO
+#define PIN_TOUCH_INT (GPIO_NUM_4)              // Touch controller INT GPIO
 
 /* Inputs */
 typedef enum
 {
-    BSP_BTN_PRESS = GPIO_NUM_0, // пользовательская кнопка (BOOT)
+    BSP_BTN_PRESS = GPIO_NUM_0, // User button (BOOT)
 } bsp_button_t;
 
-#define BSP_ENCODER_A (GPIO_NUM_6) // фаза A энкодера
-#define BSP_ENCODER_B (GPIO_NUM_5) // фаза B энкодера
+#define BSP_ENCODER_A (GPIO_NUM_6) // Encoder phase A
+#define BSP_ENCODER_B (GPIO_NUM_5) // Encoder phase B
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Panel vendor init commands (SH8601) //////////////////////////////////////////////////////////////
@@ -118,10 +119,10 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xC4, (uint8_t[]){0x80}, 1, 0},
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 0, 10},
-    {0x53, (uint8_t[]){0x20}, 1, 10}, // включить управление яркостью (BL ctrl)
-    {0x51, (uint8_t[]){0xA0}, 1, 10}, // яркость = 0xFF (максимум) при старте
+    {0x53, (uint8_t[]){0x20}, 1, 10}, // Enable backlight control (DCS 0x53)
+    {0x51, (uint8_t[]){0xA0}, 1, 10}, // Default brightness level at startup
     {0x63, (uint8_t[]){0xFF}, 1, 10},
-    /* Address window: revert to vendor defaults used previously
+    /* Address window: vendor defaults used previously
      * Columns: start=6, end=477  (0x0006 .. 0x01DD) -> width 472
      * Rows:    start=0, end=465  (0x0000 .. 0x01D1) -> height 466
      * Fine alignment is handled via esp_lcd_panel_set_gap below.
@@ -139,17 +140,17 @@ static esp_err_t app_touch_init(void)
 {
     const i2c_config_t i2c_conf = {
         .mode = I2C_MODE_MASTER,
-        .sda_io_num = EXAMPLE_PIN_NUM_TOUCH_SDA,
+        .sda_io_num = PIN_TOUCH_SDA,
         .sda_pullup_en = GPIO_PULLUP_ENABLE, /* Enable internal pull-ups unless external exist */
-        .scl_io_num = EXAMPLE_PIN_NUM_TOUCH_SCL,
+        .scl_io_num = PIN_TOUCH_SCL,
         .scl_pullup_en = GPIO_PULLUP_ENABLE, /* Enable internal pull-ups unless external exist */
-        .master.clk_speed = EXAMPLE_TOUCH_I2C_CLK_HZ};
-    ESP_RETURN_ON_ERROR(i2c_param_config(EXAMPLE_TOUCH_I2C_NUM, &i2c_conf), TAG, "I2C configuration failed");
-    ESP_RETURN_ON_ERROR(i2c_driver_install(EXAMPLE_TOUCH_I2C_NUM, i2c_conf.mode, 0, 0, 0), TAG, "I2C initialization failed");
+        .master.clk_speed = TOUCH_I2C_CLK_HZ};
+    ESP_RETURN_ON_ERROR(i2c_param_config(TOUCH_I2C_NUM, &i2c_conf), TAG, "I2C configuration failed");
+    ESP_RETURN_ON_ERROR(i2c_driver_install(TOUCH_I2C_NUM, i2c_conf.mode, 0, 0, 0), TAG, "I2C initialization failed");
 
     /* Ensure INT pin has a pull-up (CST816S INT is usually active-low/open-drain) */
     gpio_config_t int_gpio_cfg = {
-        .pin_bit_mask = 1ULL << EXAMPLE_PIN_NUM_TOUCH_INT,
+        .pin_bit_mask = 1ULL << PIN_TOUCH_INT,
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = 1,
         .pull_down_en = 0,
@@ -158,10 +159,10 @@ static esp_err_t app_touch_init(void)
     ESP_RETURN_ON_ERROR(gpio_config(&int_gpio_cfg), TAG, "INT GPIO config failed");
 
     const esp_lcd_touch_config_t tp_cfg = {
-        .x_max = EXAMPLE_LCD_H_RES,
-        .y_max = EXAMPLE_LCD_V_RES,
-        .rst_gpio_num = EXAMPLE_PIN_NUM_TOUCH_RST,
-        .int_gpio_num = EXAMPLE_PIN_NUM_TOUCH_INT,
+        .x_max = LCD_H_RES,
+        .y_max = LCD_V_RES,
+        .rst_gpio_num = PIN_TOUCH_RST,
+        .int_gpio_num = PIN_TOUCH_INT,
         .levels = {
             .reset = 0,
             /* CST816S drives INT low on touch pulse, so falling edge */
@@ -176,7 +177,10 @@ static esp_err_t app_touch_init(void)
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
 #ifdef ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG
     const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)EXAMPLE_TOUCH_I2C_NUM, &tp_io_config, &tp_io_handle), TAG, "new_panel_io_i2c failed");
+    ESP_RETURN_ON_ERROR(
+        esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)TOUCH_I2C_NUM, &tp_io_config, &tp_io_handle),
+        TAG,
+        "new_panel_io_i2c failed");
     return esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &touch_handle);
 
 #else
@@ -203,25 +207,27 @@ static esp_err_t app_lvgl_init(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = lcd_io,
         .panel_handle = lcd_panel,
-        .buffer_size = EXAMPLE_LCD_H_RES * EXAMPLE_LCD_DRAW_BUFF_HEIGHT,
-        .double_buffer = EXAMPLE_LCD_DRAW_BUFF_DOUBLE,
-        .hres = EXAMPLE_LCD_H_RES,
-        .vres = EXAMPLE_LCD_V_RES,
+        .buffer_size = LCD_H_RES * LCD_DRAW_BUFF_HEIGHT,
+        .double_buffer = LCD_DRAW_BUFF_DOUBLE,
+        .hres = LCD_H_RES,
+        .vres = LCD_V_RES,
         .monochrome = false,
 #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
 #endif
-        .rotation = {
-            .swap_xy = false,
-            .mirror_x = false,
-            .mirror_y = false,
-        },
-        .flags = {
-            .buff_dma = true,
+        .rotation =
+            {
+                .swap_xy = false,
+                .mirror_x = false,
+                .mirror_y = false,
+            },
+        .flags =
+            {
+                .buff_dma = true,
 #if LVGL_VERSION_MAJOR >= 9
-            .swap_bytes = true,
+                .swap_bytes = true,
 #endif
-        }};
+            }};
     lvgl_disp = lvgl_port_add_disp(&disp_cfg);
 
     /* Register rounder callback under LVGL mutex to avoid race */
@@ -251,6 +257,7 @@ static esp_err_t app_lvgl_init(void)
 
 static void knob_event_cb(void *arg, void *data)
 {
+    (void)arg;
     /* iot_knob callbacks run in esp_timer task context.
      * Protect LVGL with lvgl_port_lock to avoid races/WDT. */
     lvgl_port_lock(0);
@@ -280,6 +287,7 @@ static void knob_init(uint32_t encoder_a, uint32_t encoder_b)
 
 static void button_event_cb(void *arg, void *data)
 {
+    (void)arg;
     /* Button callbacks also run outside the LVGL task; protect LVGL. */
     lvgl_port_lock(0);
     LVGL_button_event(data);
@@ -290,10 +298,11 @@ static void button_init(uint32_t button_num)
 {
     button_config_t btn_cfg = {
         .type = BUTTON_TYPE_GPIO,
-        .gpio_button_config = {
-            .gpio_num = (gpio_num_t)button_num,
-            .active_level = 0,
-        },
+        .gpio_button_config =
+            {
+                .gpio_num = (gpio_num_t)button_num,
+                .active_level = 0,
+            },
     };
     button_handle_t btn = iot_button_create(&btn_cfg);
     assert(btn);
@@ -315,85 +324,116 @@ static void button_init(uint32_t button_num)
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 esp_err_t devices_init(void)
 {
-    if (EXAMPLE_PIN_NUM_BK_LIGHT >= 0)
+    esp_err_t err = ESP_OK;
+
+    if (PIN_BK_LIGHT >= 0)
     {
         // Configure LEDC for PWM backlight control
         ledc_timer_config_t tcfg = {
-            .speed_mode = s_bk_ledc_mode,        // низкоскоростной таймер (LEDC_LOW_SPEED_MODE)
-            .duty_resolution = LEDC_TIMER_8_BIT, // разрядность ШИМ 8 бит: счётчик 0..255
-            .timer_num = s_bk_ledc_timer,        // номер таймера LEDC (LEDC_TIMER_0)
-            .freq_hz = 5000,                     // частота ШИМ подсветки 5 кГц
-            .clk_cfg = LEDC_AUTO_CLK,            // автоматический выбор источника тактирования
+            .speed_mode = s_bk_ledc_mode,
+            .duty_resolution = LEDC_TIMER_8_BIT,
+            .timer_num = s_bk_ledc_timer,
+            .freq_hz = 5000,
+            .clk_cfg = LEDC_AUTO_CLK,
         };
-        ESP_ERROR_CHECK(ledc_timer_config(&tcfg));
+        ESP_RETURN_ON_ERROR(ledc_timer_config(&tcfg), TAG, "Backlight LEDC timer config failed");
 
         ledc_channel_config_t ccfg = {
-            .gpio_num = EXAMPLE_PIN_NUM_BK_LIGHT, // GPIO, к которому подключена подсветка
-            .speed_mode = s_bk_ledc_mode,         // тот же режим, что и у таймера
-            .channel = s_bk_ledc_channel,         // используемый канал LEDC (LEDC_CHANNEL_0)
-            .intr_type = LEDC_INTR_DISABLE,       // прерывания LEDC не используются
-            .timer_sel = s_bk_ledc_timer,         // какой таймер LEDC обслуживает канал
-            .duty = 0,                            // стартовый duty (подсветка выключена)
-            .hpoint = 0,                          // начало импульса в начале периода
-            .flags.output_invert = 0,             // не инвертировать выход (активный высокий уровень)
+            .gpio_num = PIN_BK_LIGHT,
+            .speed_mode = s_bk_ledc_mode,
+            .channel = s_bk_ledc_channel,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = s_bk_ledc_timer,
+            .duty = 0,
+            .hpoint = 0,
+            .flags.output_invert = 0,
         };
-        ESP_ERROR_CHECK(ledc_channel_config(&ccfg));
-        // Set initial brightness to 100%
-        ESP_ERROR_CHECK(ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, 230));
-        ESP_ERROR_CHECK(ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel));
+        ESP_RETURN_ON_ERROR(ledc_channel_config(&ccfg), TAG, "Backlight LEDC channel config failed");
+
+        // Set initial brightness (slightly below full to avoid over‑driving)
+        ESP_RETURN_ON_ERROR(ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, 230),
+                            TAG,
+                            "Backlight LEDC set duty failed");
+        ESP_RETURN_ON_ERROR(ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel),
+                            TAG,
+                            "Backlight LEDC update duty failed");
         s_bk_ledc_inited = true;
     }
 
     ESP_LOGI(TAG, "Initialize SPI/QSPI bus");
     const spi_bus_config_t buscfg =
-        SH8601_PANEL_BUS_QSPI_CONFIG(EXAMPLE_PIN_NUM_LCD_PCLK, EXAMPLE_PIN_NUM_LCD_DATA0,
-                                     EXAMPLE_PIN_NUM_LCD_DATA1, EXAMPLE_PIN_NUM_LCD_DATA2,
-                                     EXAMPLE_PIN_NUM_LCD_DATA3, EXAMPLE_LCD_H_RES * EXAMPLE_LCD_V_RES * LCD_BIT_PER_PIXEL / 8);
-    ESP_ERROR_CHECK(spi_bus_initialize(EXAMPLE_LCD_HOST, &buscfg, SPI_DMA_CH_AUTO));
+        SH8601_PANEL_BUS_QSPI_CONFIG(PIN_LCD_PCLK,
+                                     PIN_LCD_DATA0,
+                                     PIN_LCD_DATA1,
+                                     PIN_LCD_DATA2,
+                                     PIN_LCD_DATA3,
+                                     LCD_H_RES * LCD_V_RES * LCD_BIT_PER_PIXEL / 8);
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO),
+                        TAG,
+                        "SPI bus initialize failed");
 
     ESP_LOGI(TAG, "Install panel IO");
     const esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = -1,
-        .cs_gpio_num = EXAMPLE_PIN_NUM_LCD_CS,
-        .pclk_hz = EXAMPLE_LCD_SPI_SPEED_MHZ * 1000 * 1000,
-        .trans_queue_depth = EXAMPLE_LCD_TRANS_QUEUE_DEPTH,
+        .cs_gpio_num = PIN_LCD_CS,
+        .pclk_hz = LCD_SPI_SPEED_MHZ * 1000 * 1000,
+        .trans_queue_depth = LCD_TRANS_QUEUE_DEPTH,
         .lcd_cmd_bits = 32,
         .lcd_param_bits = 8,
         .spi_mode = 0,
-        .flags = {
-            .quad_mode = true, /* test stability without QSPI */
-        },
+        .flags =
+            {
+                .quad_mode = true, /* test stability without QSPI */
+            },
     };
 
     sh8601_vendor_config_t vendor_config = {
         .init_cmds = lcd_init_cmds,
         .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(sh8601_lcd_init_cmd_t),
-        .flags = {
-            .use_qspi_interface = 1,
-        },
+        .flags =
+            {
+                .use_qspi_interface = 1,
+            },
     };
 
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)EXAMPLE_LCD_HOST, &io_config, &lcd_io));
+    ESP_RETURN_ON_ERROR(
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &lcd_io),
+        TAG,
+        "New panel IO SPI failed");
 
     const esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = EXAMPLE_PIN_NUM_LCD_RST,
+        .reset_gpio_num = PIN_LCD_RST,
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = LCD_BIT_PER_PIXEL,
         .vendor_config = &vendor_config,
     };
     ESP_LOGI(TAG, "Install LCD driver");
-    ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(lcd_io, &panel_config, &lcd_panel));
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_sh8601(lcd_io, &panel_config, &lcd_panel),
+                        TAG,
+                        "New SH8601 panel failed");
 
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(lcd_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(lcd_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(lcd_panel, true));
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(lcd_panel), TAG, "LCD panel reset failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(lcd_panel), TAG, "LCD panel init failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(lcd_panel, true), TAG, "LCD panel display on failed");
 
-    ESP_ERROR_CHECK(app_touch_init());
+    err = app_touch_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Touch init failed: %s", esp_err_to_name(err));
+        return err;
+    }
     esp_log_level_set("CST816S", ESP_LOG_NONE);
-    ESP_ERROR_CHECK(app_lvgl_init());
+
+    err = app_lvgl_init();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "LVGL init failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     knob_init(BSP_ENCODER_A, BSP_ENCODER_B);
     button_init(BSP_BTN_PRESS);
 
     return ESP_OK;
 }
+
