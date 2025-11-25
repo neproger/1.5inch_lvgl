@@ -366,9 +366,11 @@ namespace ui
             // Turn off backlight
             (void)devices_set_backlight_percent(0);
 
-            // Configure wakeup on user button (BOOT) using light-sleep GPIO wakeup
-            // Button is active-low, so wake on low level.
-            gpio_wakeup_enable(GPIO_NUM_0, GPIO_INTR_LOW_LEVEL);
+            // Configure wakeup on user button (BOOT) and encoder using light-sleep GPIO wakeup.
+            // Inputs are active-low (or pulsed low), so wake on low level.
+            gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
+            gpio_wakeup_enable(BSP_ENCODER_A, GPIO_INTR_LOW_LEVEL);
+            gpio_wakeup_enable(BSP_ENCODER_B, GPIO_INTR_LOW_LEVEL);
             esp_sleep_enable_gpio_wakeup();
 
             ESP_LOGI("screensaver", "Entering light sleep from screensaver");

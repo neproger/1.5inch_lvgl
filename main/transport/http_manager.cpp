@@ -30,43 +30,73 @@ namespace http_manager
             std::string token;
         };
 
-        static HaHttpConfig get_http_config()
+        // Build a list of HTTP connections from config_store (web UI),
+        // falling back to compile-time defaults if none are stored.
+        // Returns number of filled entries in out_cfg (up to max_cfg).
+        static int build_http_configs(HaHttpConfig *out_cfg, int max_cfg)
         {
-            config_store::HaConn conns[1];
-            std::size_t count = 0;
-            if (config_store::load_ha(conns, 1, count) == ESP_OK && count > 0 && conns[0].host[0] != '\0')
+            if (!out_cfg || max_cfg <= 0)
             {
-                const auto &c = conns[0];
-                HaHttpConfig cfg;
-                std::string host = c.host;
-                if (host.rfind("http://", 0) == 0 || host.rfind("https://", 0) == 0)
-                {
-                    cfg.url = host;
-                }
-                else
-                {
-                    cfg.url = "http://";
-                    cfg.url += host;
-                }
-                if (c.http_port != 0)
-                {
-                    cfg.url += ":";
-                    cfg.url += std::to_string(c.http_port);
-                }
-                // Always use /api/template for bootstrap and weather
-                if (cfg.url.find("/api/template") == std::string::npos)
-                {
-                    cfg.url += "/api/template";
-                }
-                cfg.token = c.http_token;
-                return cfg;
+                return 0;
             }
 
-            // Fallback to compile-time config
-            HaHttpConfig cfg;
-            cfg.url = HA_HTTP_BOOTSTRAP_URL;
-            cfg.token = HA_HTTP_BEARER_TOKEN;
-            return cfg;
+            int out_count = 0;
+
+            config_store::HaConn stored[4];
+            std::size_t stored_count = 0;
+            if (config_store::load_ha(stored, 4, stored_count) == ESP_OK && stored_count > 0)
+            {
+                for (std::size_t i = 0; i < stored_count && out_count < max_cfg; ++i)
+                {
+                    const auto &c = stored[i];
+                    if (!c.host[0])
+                    {
+                        continue;
+                    }
+
+                    HaHttpConfig cfg;
+                    std::string host = c.host;
+                    if (host.rfind("http://", 0) == 0 || host.rfind("https://", 0) == 0)
+                    {
+                        cfg.url = host;
+                    }
+                    else
+                    {
+                        cfg.url = "http://";
+                        cfg.url += host;
+                    }
+                    if (c.http_port != 0)
+                    {
+                        cfg.url += ":";
+                        cfg.url += std::to_string(c.http_port);
+                    }
+                    // Always use /api/template for bootstrap and weather
+                    if (cfg.url.find("/api/template") == std::string::npos)
+                    {
+                        if (!cfg.url.empty() && cfg.url.back() != '/')
+                        {
+                            cfg.url += "/api/template";
+                        }
+                        else
+                        {
+                            cfg.url += "api/template";
+                        }
+                    }
+                    cfg.token = c.http_token;
+                    out_cfg[out_count++] = cfg;
+                }
+            }
+
+            if (out_count == 0)
+            {
+                // Fallback to compile-time config (single default server)
+                HaHttpConfig cfg;
+                cfg.url = HA_HTTP_BOOTSTRAP_URL;
+                cfg.token = HA_HTTP_BEARER_TOKEN;
+                out_cfg[out_count++] = cfg;
+            }
+
+            return out_count;
         }
 
         static const char *kBootstrapTemplateBody = R"json(
@@ -108,33 +138,51 @@ namespace http_manager
 
         static bool perform_bootstrap_request()
         {
-            HaHttpConfig cfg = get_http_config();
+            HaHttpConfig cfgs[4];
+            const int cfg_count = build_http_configs(cfgs, 4);
             char buf[2048];
-            int status = 0;
-            const char *token = (!cfg.token.empty() && cfg.token[0]) ? cfg.token.c_str() : nullptr;
-            esp_err_t err = http_send("POST", cfg.url.c_str(), kBootstrapTemplateBody, "application/json", token, buf, sizeof(buf), &status);
-            if (err != ESP_OK)
+
+            for (int i = 0; i < cfg_count; ++i)
             {
-                ESP_LOGW(TAG, "Bootstrap HTTP error: %s", esp_err_to_name(err));
-                return false;
+                int status = 0;
+                const char *token = (!cfgs[i].token.empty() && cfgs[i].token[0]) ? cfgs[i].token.c_str() : nullptr;
+                ESP_LOGI(TAG, "Bootstrap: trying HA server %d/%d at %s", i + 1, cfg_count, cfgs[i].url.c_str());
+
+                esp_err_t err = http_send("POST",
+                                          cfgs[i].url.c_str(),
+                                          kBootstrapTemplateBody,
+                                          "application/json",
+                                          token,
+                                          buf,
+                                          sizeof(buf),
+                                          &status);
+                if (err != ESP_OK)
+                {
+                    ESP_LOGW(TAG, "Bootstrap HTTP error (server %d): %s", i + 1, esp_err_to_name(err));
+                    continue;
+                }
+                if (status < 200 || status >= 300)
+                {
+                    ESP_LOGW(TAG, "Bootstrap HTTP status %d (server %d)", status, i + 1);
+                    continue;
+                }
+                if (!state::init_from_csv(buf, std::strlen(buf)))
+                {
+                    ESP_LOGW(TAG, "Failed to parse bootstrap CSV (server %d); proceeding with empty state", i + 1);
+                }
+                else
+                {
+                    ESP_LOGI(TAG, "State initialized from server %d: %d areas, %d entities",
+                             i + 1,
+                             (int)state::areas().size(),
+                             (int)state::entities().size());
+                }
+                ESP_LOGI(TAG, "Bootstrap HTTP ok (status %d, server %d)", status, i + 1);
+                return true;
             }
-            if (status < 200 || status >= 300)
-            {
-                ESP_LOGW(TAG, "Bootstrap HTTP status %d", status);
-                return false;
-            }
-            if (!state::init_from_csv(buf, std::strlen(buf)))
-            {
-                ESP_LOGW(TAG, "Failed to parse bootstrap CSV; proceeding with empty state");
-            }
-            else
-            {
-                ESP_LOGI(TAG, "State initialized: %d areas, %d entities",
-                         (int)state::areas().size(),
-                         (int)state::entities().size());
-            }
-            ESP_LOGI(TAG, "Bootstrap HTTP ok (status %d)", status);
-            return true;
+
+            ESP_LOGW(TAG, "Bootstrap: all HA servers failed");
+            return false;
         }
 
         static void trim_ws(std::string &s)
@@ -269,19 +317,42 @@ namespace http_manager
                     continue;
                 }
 
-                HaHttpConfig cfg = get_http_config();
-                int status = 0;
-                const char *token = (!cfg.token.empty() && cfg.token[0]) ? cfg.token.c_str() : nullptr;
-                esp_err_t err = http_send("POST", cfg.url.c_str(), kWeatherTemplateBody, "application/json", token, buf, sizeof(buf), &status);
-                if (err != ESP_OK)
+                HaHttpConfig cfgs[4];
+                const int cfg_count = build_http_configs(cfgs, 4);
+                bool ok = false;
+
+                for (int i = 0; i < cfg_count; ++i)
                 {
-                    ESP_LOGW(TAG, "Weather HTTP error: %s", esp_err_to_name(err));
-                    vTaskDelay(kErrorDelayTicks);
-                    continue;
+                    int status = 0;
+                    const char *token = (!cfgs[i].token.empty() && cfgs[i].token[0]) ? cfgs[i].token.c_str() : nullptr;
+                    ESP_LOGI(TAG, "Weather: trying HA server %d/%d at %s", i + 1, cfg_count, cfgs[i].url.c_str());
+
+                    esp_err_t err = http_send("POST",
+                                              cfgs[i].url.c_str(),
+                                              kWeatherTemplateBody,
+                                              "application/json",
+                                              token,
+                                              buf,
+                                              sizeof(buf),
+                                              &status);
+                    if (err != ESP_OK)
+                    {
+                        ESP_LOGW(TAG, "Weather HTTP error (server %d): %s", i + 1, esp_err_to_name(err));
+                        continue;
+                    }
+                    if (status < 200 || status >= 300)
+                    {
+                        ESP_LOGW(TAG, "Weather HTTP status %d (server %d)", status, i + 1);
+                        continue;
+                    }
+
+                    ok = true;
+                    break;
                 }
-                if (status < 200 || status >= 300)
+
+                if (!ok)
                 {
-                    ESP_LOGW(TAG, "Weather HTTP status %d", status);
+                    ESP_LOGW(TAG, "Weather: all HA servers failed");
                     vTaskDelay(kErrorDelayTicks);
                     continue;
                 }
@@ -343,7 +414,9 @@ namespace http_manager
     {
         if (s_weather_task == nullptr)
         {
-            xTaskCreate(weather_task, "weather", 4096, nullptr, 3, &s_weather_task);
+            // Weather task does HTTP requests, string parsing, etc.,
+            // so give it a slightly larger stack to avoid overflow.
+            xTaskCreate(weather_task, "weather", 6144, nullptr, 3, &s_weather_task);
         }
     }
 

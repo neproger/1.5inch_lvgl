@@ -1,6 +1,14 @@
 #pragma once
 
 #include "esp_err.h"
+#include "driver/gpio.h"
+
+// Board input pin assignment (shared between devices_init and UI).
+// User button (BOOT)
+#define BSP_BTN_PRESS GPIO_NUM_0
+// Encoder phases
+#define BSP_ENCODER_A GPIO_NUM_6
+#define BSP_ENCODER_B GPIO_NUM_5
 
 #ifdef __cplusplus
 extern "C" {

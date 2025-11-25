@@ -22,7 +22,7 @@ extern "C"
         uint16_t mqtt_port;
         char mqtt_username[32];
         char mqtt_password[64];
-        char http_token[160];
+        char http_token[256];
     } config_store_ha_conn_t;
 
     esp_err_t config_store_load_wifi_c(config_store_wifi_ap_t *aps, size_t max_count, size_t *out_count);

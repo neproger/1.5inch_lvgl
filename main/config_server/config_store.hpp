@@ -20,7 +20,8 @@ namespace config_store
         uint16_t mqtt_port{1883};
         char mqtt_username[32]{};
         char mqtt_password[64]{};
-        char http_token[160]{}; // long-lived HA token
+        // Long-lived Home Assistant token (can be >180 chars).
+        char http_token[256]{}; // long-lived HA token
     };
 
     // Initialize NVS namespace (must be called before other operations).

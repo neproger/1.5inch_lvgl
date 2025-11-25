@@ -6,6 +6,7 @@
 #include "esp_http_client.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_err.h"
 
 #include "wifi_manager.h"
 #include "http_utils.h"
@@ -22,9 +23,14 @@ esp_err_t http_send(const char *method,
                     int *out_status_code_opt)
 {
     if (!method || !url)
+    {
+        ESP_LOGE(TAG_HTTP, "http_send: invalid args (method=%p, url=%p)", method, url);
         return ESP_ERR_INVALID_ARG;
+    }
+
     if (!wifi_manager_is_connected())
     {
+        ESP_LOGE(TAG_HTTP, "http_send: WiFi is not connected, aborting HTTP %s %s", method, url);
         if (out_status_code_opt)
             *out_status_code_opt = 0;
         return ESP_ERR_INVALID_STATE;
@@ -38,9 +44,14 @@ esp_err_t http_send(const char *method,
     cfg.buffer_size_tx = 1024;
     cfg.keep_alive_enable = true;
 
+    ESP_LOGI(TAG_HTTP, "http_send: preparing HTTP %s %s", method, url);
+
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (!client)
+    {
+        ESP_LOGE(TAG_HTTP, "http_send: esp_http_client_init failed (no memory?)");
         return ESP_ERR_NO_MEM;
+    }
 
     esp_http_client_method_t m = HTTP_METHOD_GET;
     if (strcasecmp(method, "POST") == 0)
@@ -71,9 +82,12 @@ esp_err_t http_send(const char *method,
     }
 
     size_t body_len = body ? std::strlen(body) : 0;
+    ESP_LOGI(TAG_HTTP, "http_send: opening connection, body_len=%d", (int)body_len);
+
     esp_err_t err = esp_http_client_open(client, (int)body_len);
     if (err != ESP_OK)
     {
+        ESP_LOGE(TAG_HTTP, "http_send: esp_http_client_open failed: %s (0x%x)", esp_err_to_name(err), (int)err);
         esp_http_client_cleanup(client);
         return err;
     }
@@ -82,6 +96,7 @@ esp_err_t http_send(const char *method,
         int written = esp_http_client_write(client, body, (int)body_len);
         if (written < 0 || (size_t)written != body_len)
         {
+            ESP_LOGE(TAG_HTTP, "http_send: write failed, written=%d expected=%d", written, (int)body_len);
             esp_http_client_close(client);
             esp_http_client_cleanup(client);
             return ESP_FAIL;
