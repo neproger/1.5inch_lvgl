@@ -28,7 +28,13 @@ namespace http_manager
         {
             std::string url;
             std::string token;
+            std::string host;      // Raw host from config_store (without scheme transformation)
+            std::uint16_t http_port{0};
         };
+
+        // Last HA HTTP endpoint that responded successfully (bootstrap or weather).
+        static std::string s_last_http_host;
+        static std::uint16_t s_last_http_port = 0;
 
         // Build a list of HTTP connections from config_store (web UI),
         // falling back to compile-time defaults if none are stored.
@@ -56,6 +62,9 @@ namespace http_manager
 
                     HaHttpConfig cfg;
                     std::string host = c.host;
+                    cfg.host = c.host;
+                    const std::uint16_t http_port = c.http_port ? c.http_port : 8123;
+                    cfg.http_port = http_port;
                     if (host.rfind("http://", 0) == 0 || host.rfind("https://", 0) == 0)
                     {
                         cfg.url = host;
@@ -65,10 +74,10 @@ namespace http_manager
                         cfg.url = "http://";
                         cfg.url += host;
                     }
-                    if (c.http_port != 0)
+                    if (http_port != 0)
                     {
                         cfg.url += ":";
-                        cfg.url += std::to_string(c.http_port);
+                        cfg.url += std::to_string(http_port);
                     }
                     // Always use /api/template for bootstrap and weather
                     if (cfg.url.find("/api/template") == std::string::npos)
@@ -93,6 +102,8 @@ namespace http_manager
                 HaHttpConfig cfg;
                 cfg.url = HA_HTTP_BOOTSTRAP_URL;
                 cfg.token = HA_HTTP_BEARER_TOKEN;
+                cfg.host = HA_SERVER_HOST;
+                cfg.http_port = static_cast<std::uint16_t>(std::stoi(HA_HTTP_PORT));
                 out_cfg[out_count++] = cfg;
             }
 
@@ -177,6 +188,10 @@ namespace http_manager
                              (int)state::areas().size(),
                              (int)state::entities().size());
                 }
+
+                // Remember which HTTP endpoint worked last.
+                s_last_http_host = cfgs[i].host;
+                s_last_http_port = cfgs[i].http_port;
                 ESP_LOGI(TAG, "Bootstrap HTTP ok (status %d, server %d)", status, i + 1);
                 return true;
             }
@@ -346,6 +361,10 @@ namespace http_manager
                         continue;
                     }
 
+                    // Remember which HTTP endpoint worked last.
+                    s_last_http_host = cfgs[i].host;
+                    s_last_http_port = cfgs[i].http_port;
+
                     ok = true;
                     break;
                 }
@@ -418,6 +437,17 @@ namespace http_manager
             // so give it a slightly larger stack to avoid overflow.
             xTaskCreate(weather_task, "weather", 6144, nullptr, 3, &s_weather_task);
         }
+    }
+
+    bool get_last_successful_http_host(std::string &host, std::uint16_t &http_port)
+    {
+        if (s_last_http_host.empty() || s_last_http_port == 0)
+        {
+            return false;
+        }
+        host = s_last_http_host;
+        http_port = s_last_http_port;
+        return true;
     }
 
 } // namespace http_manager
