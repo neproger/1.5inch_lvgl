@@ -124,7 +124,7 @@ extern "C" void app_main(void)
 
     wifi_manager_start_auto(-85, 15000); // Keep Wi-Fi connected in background after bootstrap
     (void)router::start();               // Start connectivity via Router (currently MQTT)
-
+    lvgl_port_lock(0);
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
     ui::screensaver::init_support();
