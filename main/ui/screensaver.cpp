@@ -2,8 +2,9 @@
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
-#include "esp_sleep.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "driver/rtc_io.h"
 #include "driver/gpio.h"
 #include "fonts.h"
 #include "http_manager.hpp"
@@ -26,12 +27,13 @@ namespace ui
         static lv_timer_t *s_idle_timer = nullptr;
         static lv_timer_t *s_clock_timer = nullptr;
         static bool s_active = false;
+        static bool s_backlight_off = false;
         static const uint32_t kScreensaverTimeoutMs = 10000;
-        static const uint32_t kSleepAfterScreensaverMs = 10000;
+        static const uint32_t kBacklightOffAfterScreensaverMs = 10000;
 
         static void idle_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
-        static void enter_light_sleep();
+        static void enter_light_sleep(void);
 
         void ui_build_screensaver()
         {
@@ -96,7 +98,6 @@ namespace ui
             {
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
             }
-
         }
 
         bool is_active()
@@ -274,8 +275,7 @@ namespace ui
                     "Среда",
                     "Четверг",
                     "Пятница",
-                    "Суббота"
-                    };
+                    "Суббота"};
 
                 static const char *kMonthNames[13] = {
                     "",
@@ -345,9 +345,17 @@ namespace ui
             }
             else
             {
-                if (inactive_ms >= (kScreensaverTimeoutMs + kSleepAfterScreensaverMs))
+                // Screensaver already active.
+                if (inactive_ms >= (kScreensaverTimeoutMs + kBacklightOffAfterScreensaverMs))
                 {
-                    enter_light_sleep();
+                    // enter_light_sleep();
+                }
+                else if (s_backlight_off)
+                {
+                    // Recent activity with saver still shown: turn display back on once.
+                    ESP_LOGI("screensaver", "Screensaver: enabling display output");
+                    devices_display_set_enabled(true);
+                    s_backlight_off = false;
                 }
             }
         }
@@ -361,28 +369,28 @@ namespace ui
             lvgl_port_unlock();
         }
 
-        static void enter_light_sleep()
+        static const char *TAG = "screensaver";
+
+        static void enter_light_sleep(void)
         {
-            // Turn off backlight
-            (void)devices_set_backlight_percent(0);
+            // Disable display output before sleep
+            devices_display_set_enabled(false);
 
-            // Configure wakeup on user button (BOOT) and encoder using light-sleep GPIO wakeup.
-            // Inputs are active-low (or pulsed low), so wake on low level.
+            // Configure wakeup on BOOT button (GPIO0, active low), like IDF example
+            gpio_config_t config = {};
+            config.pin_bit_mask = (1ULL << BSP_BTN_PRESS);
+            config.mode = GPIO_MODE_INPUT;
+            config.pull_up_en = GPIO_PULLUP_ENABLE;
+            config.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            config.intr_type = GPIO_INTR_DISABLE;
+            gpio_config(&config);
             gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
-            gpio_wakeup_enable(BSP_ENCODER_A, GPIO_INTR_LOW_LEVEL);
-            gpio_wakeup_enable(BSP_ENCODER_B, GPIO_INTR_LOW_LEVEL);
             esp_sleep_enable_gpio_wakeup();
-
-            ESP_LOGI("screensaver", "Entering light sleep from screensaver");
-            // Enter light sleep; will resume here after wakeup
             esp_light_sleep_start();
-
-            // Restore backlight after wakeup
-            (void)devices_set_backlight_percent(100);
-
-            // Mark activity so screensaver does not immediately re-engage
+            auto cause = esp_sleep_get_wakeup_cause();
+            // Restore display output and mark activity after wake
+            devices_display_set_enabled(true);
             lv_display_trigger_activity(nullptr);
         }
-
     } // namespace screensaver
 } // namespace ui

@@ -23,6 +23,42 @@
 
 static const char *TAG_APP = "app";
 
+static void gpio_debug_task(void *arg)
+{
+    (void)arg;
+
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << BSP_WAKE_GPIO) | (1ULL << GPIO_NUM_40);
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    gpio_config(&io_conf);
+
+    int last_39 = -1;
+    int last_40 = -1;
+
+    while (true)
+    {
+        int level_39 = gpio_get_level(GPIO_NUM_39);
+        int level_40 = gpio_get_level(GPIO_NUM_40);
+
+        if (level_39 != last_39)
+        {
+            ESP_LOGI("gpio_debug", "GPIO39=%d", level_39);
+            last_39 = level_39;
+        }
+
+        if (level_40 != last_40)
+        {
+            ESP_LOGI("gpio_debug", "GPIO40=%d", level_40);
+            last_40 = level_40;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+}
+
 static void enter_config_mode()
 {
     // Start configuration access point + HTTP UI and park main task.
@@ -56,6 +92,9 @@ extern "C" void app_main(void)
     {
         return;
     }
+
+    // Debug task to monitor GPIO39/40 levels
+    xTaskCreate(gpio_debug_task, "gpio_debug", 2048, nullptr, 1, nullptr);
 
     // Initialize application-level input mapping
     (void)input_controller::init();

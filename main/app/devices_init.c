@@ -429,38 +429,19 @@ esp_err_t devices_init(void)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//////////////////// Backlight control (public API) ////////////////////////////////////////////////////////////////////
+//////////////////// Panel on/off control (public API) /////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-esp_err_t devices_set_backlight_raw(uint8_t level)
+esp_err_t devices_display_set_enabled(bool enabled)
 {
-    if (!s_bk_ledc_inited)
+    if (!lcd_panel)
     {
         return ESP_ERR_INVALID_STATE;
     }
-    uint32_t duty = level;
-    esp_err_t err = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, duty);
+    esp_err_t err = esp_lcd_panel_disp_on_off(lcd_panel, enabled);
     if (err != ESP_OK)
     {
-        return err;
+        ESP_LOGE(TAG, "LCD panel disp_on_off(%d) failed: %s", enabled ? 1 : 0, esp_err_to_name(err));
     }
-    return ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
-}
-
-esp_err_t devices_set_backlight_percent(int percent)
-{
-    if (!s_bk_ledc_inited)
-    {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (percent < 0)
-    {
-        percent = 0;
-    }
-    if (percent > 100)
-    {
-        percent = 100;
-    }
-    uint32_t duty = (uint32_t)((percent * 255 + 50) / 100); // round to nearest
-    return devices_set_backlight_raw((uint8_t)duty);
+    return err;
 }
