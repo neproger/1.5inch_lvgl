@@ -348,7 +348,7 @@ namespace ui
                 // Screensaver already active.
                 if (inactive_ms >= (kScreensaverTimeoutMs + kBacklightOffAfterScreensaverMs))
                 {
-                    // enter_light_sleep();
+                    enter_light_sleep();
                 }
                 else if (s_backlight_off)
                 {
@@ -374,7 +374,7 @@ namespace ui
         static void enter_light_sleep(void)
         {
             // Disable display output before sleep
-            devices_display_set_enabled(false);
+            //devices_display_set_enabled(false);
 
             // Configure wakeup on BOOT button (GPIO0, active low), like IDF example
             gpio_config_t config = {};
@@ -387,10 +387,11 @@ namespace ui
             gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
             esp_sleep_enable_gpio_wakeup();
             esp_light_sleep_start();
+            // esp_restart();
             auto cause = esp_sleep_get_wakeup_cause();
             // Restore display output and mark activity after wake
-            devices_display_set_enabled(true);
-            lv_display_trigger_activity(nullptr);
+            //devices_display_set_enabled(true);
+            // lv_display_trigger_activity(nullptr);
         }
     } // namespace screensaver
 } // namespace ui
