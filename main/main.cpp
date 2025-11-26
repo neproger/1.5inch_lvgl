@@ -23,7 +23,7 @@
 
 static const char *TAG_APP = "app";
 
-static void gpio_debug_task(void *arg)
+/* static void gpio_debug_task(void *arg)
 {
     (void)arg;
 
@@ -57,7 +57,7 @@ static void gpio_debug_task(void *arg)
 
         vTaskDelay(pdMS_TO_TICKS(200));
     }
-}
+} */
 
 static void enter_config_mode()
 {
@@ -92,9 +92,12 @@ extern "C" void app_main(void)
     {
         return;
     }
-
+    lvgl_port_lock(0);
+    ui::splash::show();
+    ui::splash::update_progress(10); // WiFi + display/devices ready
+    lvgl_port_unlock();
     // Debug task to monitor GPIO39/40 levels
-    xTaskCreate(gpio_debug_task, "gpio_debug", 2048, nullptr, 1, nullptr);
+    // xTaskCreate(gpio_debug_task, "gpio_debug", 2048, nullptr, 1, nullptr);
 
     // Initialize application-level input mapping
     (void)input_controller::init();
@@ -106,7 +109,6 @@ extern "C" void app_main(void)
 
     /* Show splash as early as possible so user sees progress during bootstrap */
     lvgl_port_lock(0);
-    ui::splash::show();
     ui::splash::update_progress(25); // WiFi + display/devices ready
     lvgl_port_unlock();
 
@@ -123,16 +125,9 @@ extern "C" void app_main(void)
     wifi_manager_start_auto(-85, 15000); // Keep Wi-Fi connected in background after bootstrap
     (void)router::start();               // Start connectivity via Router (currently MQTT)
 
-    lvgl_port_lock(0);
-    ui::splash::update_progress(80); // Connectivity ready
-    lvgl_port_unlock();
-
-    /* Create your UI under LVGL mutex */
-    lvgl_port_lock(0);
-    ui::screensaver::init_support();
-    ui_app_init();
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
+    ui::screensaver::init_support();
     lvgl_port_unlock();
 
     ui::screensaver::start_weather_polling();
