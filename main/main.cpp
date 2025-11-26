@@ -109,7 +109,7 @@ extern "C" void app_main(void)
 
     /* Show splash as early as possible so user sees progress during bootstrap */
     lvgl_port_lock(0);
-    ui::splash::update_progress(25); // WiFi + display/devices ready
+    ui::splash::update_progress(30); // WiFi + display/devices ready
     lvgl_port_unlock();
 
     if (!http_manager::bootstrap_state())
@@ -124,11 +124,19 @@ extern "C" void app_main(void)
 
     wifi_manager_start_auto(-85, 15000); // Keep Wi-Fi connected in background after bootstrap
     (void)router::start();               // Start connectivity via Router (currently MQTT)
+
     lvgl_port_lock(0);
+    ui::splash::update_progress(80); // Connectivity ready
+    lvgl_port_unlock();
+
+    /* Create your UI under LVGL mutex */
+    lvgl_port_lock(0);
+    ui_app_init();
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
     ui::screensaver::init_support();
     lvgl_port_unlock();
 
-    ui::screensaver::start_weather_polling();
+    
+    http_manager::start_weather_polling();
 }

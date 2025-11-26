@@ -319,11 +319,6 @@ namespace ui
             }
         }
 
-        void start_weather_polling()
-        {
-            http_manager::start_weather_polling();
-        }
-
         static void idle_timer_cb(lv_timer_t *timer)
         {
             (void)timer;
