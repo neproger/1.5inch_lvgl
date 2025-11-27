@@ -21,9 +21,6 @@ namespace ui
         // Initialize toggle handling (registers event bus handlers)
         esp_err_t init();
 
-        // Suppress the next user toggle (used after waking screensaver)
-        void suppress_next_toggle_once();
-
         // Handle LVGL switch event and trigger toggle over HA
         void switch_event_cb(lv_event_t *e);
 
