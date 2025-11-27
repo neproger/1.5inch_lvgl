@@ -30,7 +30,7 @@ namespace ui
         static bool s_active = false;
         static bool s_backlight_off = false;
         static const uint32_t kScreensaverTimeoutMs = 10000;
-        static const uint32_t kBacklightOffAfterScreensaverMs = 10000;
+        static const uint32_t kBacklightOffAfterScreensaverMs = 30000;
 
         static void idle_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
@@ -124,6 +124,7 @@ namespace ui
             if (room_root)
             {
                 lv_disp_load_scr(room_root);
+                (void)devices_display_set_enabled(true);
                 s_active = false;
             }
         }
@@ -344,13 +345,18 @@ namespace ui
                 // Screensaver already active.
                 if (inactive_ms >= (kScreensaverTimeoutMs + kBacklightOffAfterScreensaverMs))
                 {
-                    // enter_light_sleep();
+                    if (!s_backlight_off)
+                    {
+                        ESP_LOGI("screensaver", "Screensaver: dimming backlight (panel off)");
+                        (void)devices_display_set_enabled(false);
+                        s_backlight_off = true;
+                    }
                 }
                 else if (s_backlight_off)
                 {
                     // Recent activity with saver still shown: turn display back on once.
-                    ESP_LOGI("screensaver", "Screensaver: enabling display output");
-                    devices_display_set_enabled(true);
+                    ESP_LOGI("screensaver", "Screensaver: restoring backlight (panel on)");
+                    (void)devices_display_set_enabled(true);
                     s_backlight_off = false;
                 }
             }

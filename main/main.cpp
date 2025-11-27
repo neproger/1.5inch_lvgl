@@ -131,10 +131,11 @@ extern "C" void app_main(void)
 
     /* Create your UI under LVGL mutex */
     lvgl_port_lock(0);
+    // Build screensaver first so ui_app_init can attach input callbacks to it
+    ui::screensaver::init_support();
     ui_app_init();
     ui::splash::update_progress(100); // UI fully initialized
     ui::splash::destroy();
-    ui::screensaver::init_support();
     lvgl_port_unlock();
 
     
