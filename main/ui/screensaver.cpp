@@ -10,7 +10,7 @@
 #include "http_manager.hpp"
 #include "icons.h"
 #include "state_manager.hpp"
-#include "app/devices_init.h"
+#include "devices_init.h"
 
 namespace ui
 {

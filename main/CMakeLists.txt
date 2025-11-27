@@ -1,7 +1,10 @@
 idf_component_register(
     SRCS
         "main.cpp"
-        "app/devices_init.c"
+        "devices/devices_init.c"
+        "devices/display_init.cpp"
+        "devices/input_init.cpp"
+        "devices/touch_init.cpp"
         "ui/ui_app.cpp"
         "ui/rooms.cpp"
         "ui/screensaver.cpp"
@@ -46,6 +49,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "app"
+        "devices"
         "transport"
         "../fonts"
         "../icons"
