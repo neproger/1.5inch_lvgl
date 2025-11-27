@@ -52,6 +52,7 @@ namespace ui
         static int64_t s_last_toggle_us = 0;
         static lv_obj_t *s_spinner = nullptr;
         static std::string s_pending_toggle_entity;
+        static bool s_suppress_next_toggle = false;
 
         static void ui_show_spinner(void)
         {
@@ -142,11 +143,23 @@ namespace ui
             (void)app_events::post_toggle_request(entity_id.c_str(), now, false);
         }
 
+        void suppress_next_toggle_once()
+        {
+            s_suppress_next_toggle = true;
+        }
+
         void switch_event_cb(lv_event_t *e)
         {
             lv_event_code_t code = lv_event_get_code(e);
             if (code != LV_EVENT_VALUE_CHANGED)
             {
+                return;
+            }
+
+            if (s_suppress_next_toggle)
+            {
+                ESP_LOGI(TAG_UI_TOGGLE, "Suppressing first toggle after wake");
+                s_suppress_next_toggle = false;
                 return;
             }
 

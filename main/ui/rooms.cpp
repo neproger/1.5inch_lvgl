@@ -215,6 +215,8 @@ namespace ui
                                 // Prevent the same touch from being delivered
                                 // to widgets on the newly shown room screen.
                                 lv_indev_reset(NULL, nullptr);
+                                // Also ignore the first toggle event after wake
+                                ui::toggle::suppress_next_toggle_once();
                             }
                         }
 

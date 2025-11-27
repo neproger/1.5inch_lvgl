@@ -125,6 +125,7 @@ namespace ui
             {
                 lv_disp_load_scr(room_root);
                 (void)devices_display_set_enabled(true);
+                s_backlight_off = false;
                 s_active = false;
             }
         }
