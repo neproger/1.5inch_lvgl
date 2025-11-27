@@ -11,6 +11,7 @@
 #include "icons.h"
 #include "state_manager.hpp"
 #include "devices_init.h"
+#include "wifi_manager.h"
 
 namespace ui
 {
@@ -368,10 +369,7 @@ namespace ui
 
         static void enter_light_sleep(void)
         {
-            // Disable display output before sleep
-            devices_display_set_enabled(false);
-
-            // Configure wakeup on BOOT button (GPIO0, active low), like IDF example
+            ESP_LOGI(TAG, "Entering light sleep...");
             gpio_config_t config = {};
             config.pin_bit_mask = (1ULL << BSP_BTN_PRESS);
             config.mode = GPIO_MODE_INPUT;
@@ -381,12 +379,12 @@ namespace ui
             gpio_config(&config);
             gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
             esp_sleep_enable_gpio_wakeup();
-            esp_light_sleep_start();
-            //esp_restart();
-            auto cause = esp_sleep_get_wakeup_cause();
-            // Restore display output and mark activity after wake
-            devices_display_set_enabled(true);
+
+            esp_err_t err = esp_light_sleep_start();
+            esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+            ESP_LOGI(TAG, "Light sleep returned: err=%s, cause=%d", esp_err_to_name(err), (int)cause);
             lv_display_trigger_activity(nullptr);
         }
+
     } // namespace screensaver
 } // namespace ui

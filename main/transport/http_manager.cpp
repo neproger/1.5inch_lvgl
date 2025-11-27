@@ -8,7 +8,6 @@
 
 #include "wifi_manager.h"
 #include "http_utils.h"
-#include "ha_http_config.h"
 #include "state_manager.hpp"
 #include "config_server/config_store.hpp"
 
@@ -94,17 +93,6 @@ namespace http_manager
                     cfg.token = c.http_token;
                     out_cfg[out_count++] = cfg;
                 }
-            }
-
-            if (out_count == 0)
-            {
-                // Fallback to compile-time config (single default server)
-                HaHttpConfig cfg;
-                cfg.url = HA_HTTP_BOOTSTRAP_URL;
-                cfg.token = HA_HTTP_BEARER_TOKEN;
-                cfg.host = HA_SERVER_HOST;
-                cfg.http_port = static_cast<std::uint16_t>(std::stoi(HA_HTTP_PORT));
-                out_cfg[out_count++] = cfg;
             }
 
             return out_count;

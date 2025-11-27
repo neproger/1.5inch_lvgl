@@ -7,7 +7,6 @@
 #include "mqtt_client.h"
 
 #include "ha_mqtt.hpp"
-#include "ha_mqtt_config.h"
 #include "config_server/config_store.hpp"
 #include "http_manager.hpp"
 
@@ -15,6 +14,11 @@ namespace ha_mqtt
 {
 
     static const char *TAG = "ha_mqtt";
+
+    // Default MQTT identity/topics (previously in ha_mqtt_config.h)
+    static constexpr const char *kMqttClientId = "esp32-kazdev-ui";
+    static constexpr const char *kStatusTopic  = "ha/ui/status";
+    static constexpr const char *kCmdToggleTopic = "ha/cmd/toggle";
     static esp_mqtt_client_handle_t s_client = nullptr;
     static volatile bool s_connected = false;
     static MessageHandler s_handler = nullptr;
@@ -42,7 +46,7 @@ namespace ha_mqtt
             return;
         if (!status)
             status = "unknown";
-        (void)esp_mqtt_client_publish(s_client, HA_MQTT_STATUS_TOPIC, status, 0, 1, true);
+        (void)esp_mqtt_client_publish(s_client, kStatusTopic, status, 0, 1, true);
     }
 
     static void on_mqtt_event(void * /*handler_args*/, esp_event_base_t /*base*/, int32_t /*event_id*/, void *event_data)
@@ -100,7 +104,7 @@ namespace ha_mqtt
         if (s_client)
             return ESP_OK;
 
-        // Pick configuration: prefer NVS (config_store), fall back to compile-time.
+        // Pick configuration: prefer NVS (config_store). No more compile-time fallback.
         config_store::HaConn ha_items[4];
         std::size_t ha_count = 0;
         if (config_store::load_ha(ha_items, 4, ha_count) == ESP_OK && ha_count > 0)
@@ -149,7 +153,7 @@ namespace ha_mqtt
                 s_uri += std::to_string(mqtt_port);
                 s_user = c.mqtt_username;
                 s_pass = c.mqtt_password;
-                s_client_id = HA_MQTT_CLIENT_ID;
+                s_client_id = kMqttClientId;
                 s_host = c.host;
                 s_port = mqtt_port;
 
@@ -167,25 +171,13 @@ namespace ha_mqtt
             }
         }
 
-        if (s_uri.empty())
-        {
-            s_uri = HA_MQTT_URI;
-            s_user = HA_MQTT_USERNAME;
-            s_pass = HA_MQTT_PASSWORD;
-            s_client_id = HA_MQTT_CLIENT_ID;
-            s_host.clear();
-            s_port = 0;
-
-            ESP_LOGI(TAG, "Using fallback MQTT config: uri=%s user='%s'", s_uri.c_str(), s_user.c_str());
-        }
-
         esp_mqtt_client_config_t cfg = {};
         cfg.broker.address.uri = s_uri.c_str();
         if (!s_user.empty())
             cfg.credentials.username = s_user.c_str();
         if (!s_pass.empty())
             cfg.credentials.authentication.password = s_pass.c_str();
-        cfg.session.last_will.topic = HA_MQTT_STATUS_TOPIC;
+        cfg.session.last_will.topic = kStatusTopic;
         cfg.session.last_will.msg = "offline";
         cfg.session.last_will.qos = 1;
         cfg.session.last_will.retain = true;
@@ -218,10 +210,10 @@ namespace ha_mqtt
             return ESP_ERR_INVALID_ARG;
         if (!s_client)
             return ESP_ERR_INVALID_STATE;
-        int msg_id = esp_mqtt_client_publish(s_client, HA_MQTT_CMD_TOGGLE_TOPIC, entity_id, 0, 1, false);
+        int msg_id = esp_mqtt_client_publish(s_client, kCmdToggleTopic, entity_id, 0, 1, false);
         if (msg_id < 0)
             return ESP_FAIL;
-        ESP_LOGI(TAG, "MQTT toggle -> %s (%s)", entity_id, HA_MQTT_CMD_TOGGLE_TOPIC);
+        ESP_LOGI(TAG, "MQTT toggle -> %s (%s)", entity_id, kCmdToggleTopic);
         return ESP_OK;
     }
 

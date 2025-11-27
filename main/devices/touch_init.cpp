@@ -7,6 +7,7 @@
 
 #include "esp_lcd_touch.h"
 #include "esp_lcd_touch_cst816s.h"
+#include "esp_lcd_panel_io.h"
 
 #include "display_init.hpp"
 
@@ -20,11 +21,19 @@ static const char *TAG_TOUCH = "devices_touch";
 #define PIN_TOUCH_RST (GPIO_NUM_2)
 #define PIN_TOUCH_INT (GPIO_NUM_4)
 
+static esp_lcd_touch_handle_t s_touch_handle = NULL;
+static esp_lcd_panel_io_handle_t s_tp_io_handle = NULL;
+static bool s_touch_inited = false;
+
 esp_err_t devices_touch_init(esp_lcd_touch_handle_t *out_handle)
 {
-    if (!out_handle)
+    if (s_touch_inited)
     {
-        return ESP_ERR_INVALID_ARG;
+        if (out_handle)
+        {
+            *out_handle = s_touch_handle;
+        }
+        return ESP_OK;
     }
 
     i2c_config_t i2c_conf = {};
@@ -71,29 +80,65 @@ esp_err_t devices_touch_init(esp_lcd_touch_handle_t *out_handle)
     tp_cfg.flags.mirror_x = 0;
     tp_cfg.flags.mirror_y = 0;
 
-    esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-
 #ifdef ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG
     const esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
-    err = esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)TOUCH_I2C_NUM, &tp_io_config, &tp_io_handle);
+    err = esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)TOUCH_I2C_NUM, &tp_io_config, &s_tp_io_handle);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG_TOUCH, "new_panel_io_i2c failed: %s", esp_err_to_name(err));
         return err;
     }
 
-    err = esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, out_handle);
+    err = esp_lcd_touch_new_i2c_cst816s(s_tp_io_handle, &tp_cfg, &s_touch_handle);
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG_TOUCH, "touch_new_i2c_cst816s failed: %s", esp_err_to_name(err));
         return err;
     }
 
+    s_touch_inited = true;
+    if (out_handle)
+    {
+        *out_handle = s_touch_handle;
+    }
+
     return ESP_OK;
 #else
     ESP_LOGW(TAG_TOUCH, "CST816S touch driver not available, skipping touch init");
     (void)tp_io_handle;
-    *out_handle = NULL;
+    s_touch_handle = NULL;
+    s_tp_io_handle = NULL;
+    s_touch_inited = false;
     return ESP_OK;
 #endif
+}
+
+esp_err_t devices_touch_deinit(void)
+{
+    esp_err_t err = ESP_OK;
+
+    if (s_touch_inited && s_touch_handle)
+    {
+        esp_err_t e = esp_lcd_touch_del(s_touch_handle);
+        if (err == ESP_OK && e != ESP_OK)
+        {
+            err = e;
+        }
+        s_touch_handle = NULL;
+    }
+
+    if (s_tp_io_handle)
+    {
+        esp_err_t e = esp_lcd_panel_io_del(s_tp_io_handle);
+        if (err == ESP_OK && e != ESP_OK)
+        {
+            err = e;
+        }
+        s_tp_io_handle = NULL;
+    }
+
+    (void)i2c_driver_delete(TOUCH_I2C_NUM);
+    s_touch_inited = false;
+
+    return err;
 }

@@ -163,6 +163,80 @@ esp_err_t devices_display_init(void)
     return ESP_OK;
 }
 
+esp_err_t devices_display_deinit(void)
+{
+    esp_err_t err = ESP_OK;
+
+    if (s_lcd_panel)
+    {
+        (void)esp_lcd_panel_disp_on_off(s_lcd_panel, false);
+        esp_err_t e = esp_lcd_panel_del(s_lcd_panel);
+        if (err == ESP_OK && e != ESP_OK)
+        {
+            err = e;
+        }
+        s_lcd_panel = nullptr;
+    }
+
+    if (s_lcd_io)
+    {
+        esp_err_t e = esp_lcd_panel_io_del(s_lcd_io);
+        if (err == ESP_OK && e != ESP_OK)
+        {
+            err = e;
+        }
+        s_lcd_io = nullptr;
+    }
+
+    if (s_bk_ledc_inited)
+    {
+        ledc_stop(s_bk_ledc_mode, s_bk_ledc_channel, 0);
+        s_bk_ledc_inited = false;
+    }
+
+    (void)spi_bus_free(LCD_HOST);
+
+    return err;
+}
+
+esp_err_t devices_display_set_brightness(uint8_t level)
+{
+    if (!s_bk_ledc_inited)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t err = ledc_set_duty(s_bk_ledc_mode, s_bk_ledc_channel, level);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG_DISPLAY, "Backlight set duty failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = ledc_update_duty(s_bk_ledc_mode, s_bk_ledc_channel);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG_DISPLAY, "Backlight update duty failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t devices_display_get_brightness(uint8_t *out_level)
+{
+    if (!out_level)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_bk_ledc_inited)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t duty = ledc_get_duty(s_bk_ledc_mode, s_bk_ledc_channel);
+    *out_level = (uint8_t)duty;
+    return ESP_OK;
+}
+
 esp_lcd_panel_io_handle_t devices_display_get_panel_io(void)
 {
     return s_lcd_io;

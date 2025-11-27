@@ -5,6 +5,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include <stdint.h>
 
 // LCD and SPI bus configuration
 #define LCD_HOST (SPI2_HOST)
@@ -41,12 +42,17 @@ extern "C" {
 
 // Initialize display: SPI/QSPI bus, SH8601 panel and backlight.
 esp_err_t devices_display_init(void);
+// Deinitialize display and backlight (idempotent).
+esp_err_t devices_display_deinit(void);
 
 // Accessors used by LVGL and power control.
 esp_lcd_panel_io_handle_t devices_display_get_panel_io(void);
 esp_lcd_panel_handle_t devices_display_get_panel(void);
 
+// Set/get backlight brightness in 0..255 range (8-bit LEDC duty).
+esp_err_t devices_display_set_brightness(uint8_t level);
+esp_err_t devices_display_get_brightness(uint8_t *out_level);
+
 #ifdef __cplusplus
 }
 #endif
-

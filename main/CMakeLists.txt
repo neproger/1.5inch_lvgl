@@ -1,8 +1,9 @@
 idf_component_register(
     SRCS
         "main.cpp"
-        "devices/devices_init.c"
+        "devices/devices_init.cpp"
         "devices/display_init.cpp"
+        "devices/lvgl_init.cpp"
         "devices/input_init.cpp"
         "devices/touch_init.cpp"
         "ui/ui_app.cpp"

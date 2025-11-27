@@ -14,6 +14,10 @@
 
 static const char *TAG_INPUT = "devices_input";
 
+static knob_handle_t s_knob = nullptr;
+static button_handle_t s_button = nullptr;
+static bool s_input_active = false;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////// Encoder and Button ///////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -39,6 +43,7 @@ static void knob_init(uint32_t encoder_a, uint32_t encoder_b)
 #endif
     knob_handle_t knob = iot_knob_create(&cfg);
     assert(knob);
+    s_knob = knob;
     esp_err_t err = iot_knob_register_cb(knob, KNOB_LEFT, knob_event_cb, (void *)KNOB_LEFT);
     err |= iot_knob_register_cb(knob, KNOB_RIGHT, knob_event_cb, (void *)KNOB_RIGHT);
     err |= iot_knob_register_cb(knob, KNOB_H_LIM, knob_event_cb, (void *)KNOB_H_LIM);
@@ -64,6 +69,7 @@ static void button_init(uint32_t button_num)
     btn_cfg.gpio_button_config.active_level = 0;
     button_handle_t btn = iot_button_create(&btn_cfg);
     assert(btn);
+    s_button = btn;
     esp_err_t err = iot_button_register_cb(btn, BUTTON_PRESS_DOWN, button_event_cb, (void *)BUTTON_PRESS_DOWN);
     err |= iot_button_register_cb(btn, BUTTON_PRESS_UP, button_event_cb, (void *)BUTTON_PRESS_UP);
     err |= iot_button_register_cb(btn, BUTTON_PRESS_REPEAT, button_event_cb, (void *)BUTTON_PRESS_REPEAT);
@@ -79,10 +85,38 @@ static void button_init(uint32_t button_num)
 
 esp_err_t devices_input_init(void)
 {
+    if (s_input_active)
+    {
+        // Already initialized
+        return ESP_OK;
+    }
+
     ESP_LOGD(TAG_INPUT, "Initializing input devices (encoder + button)");
 
     knob_init(BSP_ENCODER_A, BSP_ENCODER_B);
     button_init(BSP_BTN_PRESS);
 
+    s_input_active = true;
+
+    return ESP_OK;
+}
+
+esp_err_t devices_input_deinit(void)
+{
+    if (!s_input_active)
+    {
+        return ESP_OK;
+    }
+
+    if (s_knob)
+    {
+        (void)iot_knob_stop();
+    }
+    if (s_button)
+    {
+        (void)iot_button_stop();
+    }
+
+    s_input_active = false;
     return ESP_OK;
 }

@@ -12,7 +12,6 @@
 #include "esp_check.h"
 
 #include "wifi_manager.h"
-#include "wifi_config.h"
 #include "config_server/config_store_c.h"
 
 static const char *TAG = "wifi_mgr";
@@ -150,32 +149,17 @@ static int find_known_index_config(const char *ssid, const config_store_wifi_ap_
     return -1;
 }
 
-static int find_known_index_static(const char *ssid)
-{
-    for (size_t i = 0; i < WIFI_KNOWN_APS_COUNT; ++i)
-    {
-        if (strcmp(WIFI_KNOWN_APS[i].ssid, ssid) == 0)
-        {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
 esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
 {
-    config_store_wifi_ap_t cfg_aps[WIFI_KNOWN_AP_MAX];
+    // Load Wi-Fi APs only from config_store (web UI).
+    config_store_wifi_ap_t cfg_aps[5];
     size_t cfg_count = 0;
     bool use_cfg = false;
 
-    if (config_store_load_wifi_c(cfg_aps, WIFI_KNOWN_AP_MAX, &cfg_count) == ESP_OK && cfg_count > 0)
+    if (config_store_load_wifi_c(cfg_aps, 5, &cfg_count) == ESP_OK && cfg_count > 0)
     {
         use_cfg = true;
         ESP_LOGI(TAG, "Using %u Wi-Fi APs from config_store", (unsigned)cfg_count);
-    }
-    else if (WIFI_KNOWN_APS_COUNT > 0)
-    {
-        ESP_LOGI(TAG, "Using compile-time Wi-Fi AP list");
     }
     else
     {
@@ -223,14 +207,7 @@ esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
     for (int i = 0; i < ap_num; ++i)
     {
         int known_idx = -1;
-        if (use_cfg)
-        {
-            known_idx = find_known_index_config((const char *)list[i].ssid, cfg_aps, cfg_count);
-        }
-        else
-        {
-            known_idx = find_known_index_static((const char *)list[i].ssid);
-        }
+          known_idx = find_known_index_config((const char *)list[i].ssid, cfg_aps, cfg_count);
         if (known_idx >= 0)
         {
             ESP_LOGI(TAG, "Seen known AP '%s' RSSI=%d", list[i].ssid, list[i].rssi);
@@ -250,7 +227,7 @@ esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
         return ESP_ERR_NOT_FOUND;
     }
 
-    if (best_rssi < min_rssi)
+      if (best_rssi < min_rssi)
     {
         ESP_LOGW(TAG, "Best known AP too weak: RSSI=%ld < %ld", (long)best_rssi, (long)min_rssi);
         free(list);
@@ -261,14 +238,7 @@ esp_err_t wifi_manager_connect_best_known(int32_t min_rssi)
     strncpy((char *)cfg.sta.ssid, (const char *)list[best_idx_in_list].ssid, sizeof(cfg.sta.ssid));
     cfg.sta.ssid[sizeof(cfg.sta.ssid) - 1] = '\0';
 
-    if (use_cfg)
-    {
-        strncpy((char *)cfg.sta.password, cfg_aps[best_known_idx].password, sizeof(cfg.sta.password));
-    }
-    else
-    {
-        strncpy((char *)cfg.sta.password, WIFI_KNOWN_APS[best_known_idx].password, sizeof(cfg.sta.password));
-    }
+      strncpy((char *)cfg.sta.password, cfg_aps[best_known_idx].password, sizeof(cfg.sta.password));
     cfg.sta.password[sizeof(cfg.sta.password) - 1] = '\0';
 
     cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK; // reasonable default; will still connect to stronger auth
@@ -384,8 +354,29 @@ esp_err_t wifi_manager_start_ap_config(const char *ssid, const char *password)
     cfg.ap.channel = 1;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_AP), TAG, "esp_wifi_set_mode(AP) failed");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &cfg), TAG, "esp_wifi_set_config(AP) failed");
+      ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &cfg), TAG, "esp_wifi_set_config(AP) failed");
 
-    ESP_LOGI(TAG, "AP config started, SSID='%s'", cfg.ap.ssid);
-    return ESP_OK;
-}
+      ESP_LOGI(TAG, "AP config started, SSID='%s'", cfg.ap.ssid);
+      return ESP_OK;
+  }
+
+  esp_err_t wifi_manager_suspend(void)
+  {
+      // Stop STA/AP. Manager task will see disconnected state and stay idle.
+      esp_err_t err = esp_wifi_stop();
+      if (err != ESP_OK)
+      {
+          ESP_LOGW(TAG, "esp_wifi_stop failed: %s", esp_err_to_name(err));
+      }
+      return err;
+  }
+
+  esp_err_t wifi_manager_resume(void)
+  {
+      esp_err_t err = esp_wifi_start();
+      if (err != ESP_OK)
+      {
+          ESP_LOGW(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
+      }
+      return err;
+  }

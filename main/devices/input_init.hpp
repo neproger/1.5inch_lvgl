@@ -19,6 +19,11 @@ extern "C" {
  */
 esp_err_t devices_input_init(void);
 
+/**
+ * Deinitialize encoder and button, releasing their resources (idempotent).
+ */
+esp_err_t devices_input_deinit(void);
+
 #ifdef __cplusplus
 }
 #endif

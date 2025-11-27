@@ -9,8 +9,9 @@ extern "C" {
 
 // Initialize CST816S touch controller and return handle.
 esp_err_t devices_touch_init(esp_lcd_touch_handle_t *out_handle);
+// Deinitialize touch controller and its I2C/IO resources (idempotent).
+esp_err_t devices_touch_deinit(void);
 
 #ifdef __cplusplus
 }
 #endif
-
