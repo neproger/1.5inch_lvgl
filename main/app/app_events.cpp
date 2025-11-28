@@ -306,4 +306,81 @@ namespace app_events
         return err;
     }
 
+    esp_err_t post_app_state_changed(AppState old_state, AppState new_state, std::int64_t timestamp_us, bool from_isr)
+    {
+        AppStateChangedPayload payload{};
+        payload.old_state = static_cast<int>(old_state);
+        payload.new_state = static_cast<int>(new_state);
+        payload.timestamp_us = timestamp_us;
+
+        esp_err_t err;
+        if (from_isr)
+        {
+            err = esp_event_isr_post(APP_EVENTS,
+                                     APP_STATE_CHANGED,
+                                     &payload,
+                                     sizeof(payload),
+                                     nullptr);
+        }
+        else
+        {
+            err = esp_event_post(APP_EVENTS,
+                                 APP_STATE_CHANGED,
+                                 &payload,
+                                 sizeof(payload),
+                                 0);
+        }
+
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "post_app_state_changed failed: %s", esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    static esp_err_t post_empty_event(int32_t id, std::int64_t timestamp_us, bool from_isr)
+    {
+        EmptyPayload payload{};
+        payload.timestamp_us = timestamp_us;
+
+        esp_err_t err;
+        if (from_isr)
+        {
+            err = esp_event_isr_post(APP_EVENTS,
+                                     id,
+                                     &payload,
+                                     sizeof(payload),
+                                     nullptr);
+        }
+        else
+        {
+            err = esp_event_post(APP_EVENTS,
+                                 id,
+                                 &payload,
+                                 sizeof(payload),
+                                 0);
+        }
+
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "post_empty_event(id=%d) failed: %s", (int)id, esp_err_to_name(err));
+        }
+        return err;
+    }
+
+    esp_err_t post_request_config_mode(std::int64_t timestamp_us, bool from_isr)
+    {
+        return post_empty_event(REQUEST_CONFIG_MODE, timestamp_us, from_isr);
+    }
+
+    esp_err_t post_request_sleep(std::int64_t timestamp_us, bool from_isr)
+    {
+        return post_empty_event(REQUEST_SLEEP, timestamp_us, from_isr);
+    }
+
+    esp_err_t post_request_wake(std::int64_t timestamp_us, bool from_isr)
+    {
+        return post_empty_event(REQUEST_WAKE, timestamp_us, from_isr);
+    }
+
 } // namespace app_events

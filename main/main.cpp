@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include <stdbool.h>
 #include <cstring>
 #include "wifi_manager.h"
@@ -17,24 +18,26 @@
 #include "app/event_logger.hpp"
 #include "app/input_controller.hpp"
 #include "app/toggle_controller.hpp"
+#include "app/app_state.hpp"
+#include "app/app_events.hpp"
 
 #include "config_server/config_store.hpp"
 #include "config_server/config_server.hpp"
 
 static const char *TAG_APP = "app";
 
-enum class AppState
-{
-    BootDevices,
-    BootWifi,
-    BootBootstrap,
-    NormalAwake,
-    NormalScreensaver,
-    NormalSleep,
-    ConfigMode,
-};
-
 static AppState g_app_state = AppState::BootDevices;
+
+static void set_app_state(AppState new_state)
+{
+    if (g_app_state == new_state)
+    {
+        return;
+    }
+    AppState old = g_app_state;
+    g_app_state = new_state;
+    (void)app_events::post_app_state_changed(old, new_state, esp_timer_get_time(), false);
+}
 
 // Simple application-level idle controller for screensaver.
 // For now it only decides when to show the screensaver; backlight
@@ -52,17 +55,11 @@ static void idle_controller_task(void *arg)
         uint32_t inactive_ms = disp ? lv_display_get_inactive_time(disp) : 0;
         lvgl_port_unlock();
 
-        switch (g_app_state)
+        if (g_app_state == AppState::NormalAwake &&
+            inactive_ms >= kScreensaverTimeoutMs &&
+            !ui::screensaver::is_active())
         {
-        case AppState::NormalAwake:
-            if (inactive_ms >= kScreensaverTimeoutMs && !ui::screensaver::is_active())
-            {
-                ui::screensaver::show();
-                g_app_state = AppState::NormalScreensaver;
-            }
-            break;
-        default:
-            break;
+            set_app_state(AppState::NormalScreensaver);
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -84,7 +81,7 @@ static void enter_config_mode()
 
 extern "C" void app_main(void)
 {
-    g_app_state = AppState::BootDevices;
+    set_app_state(AppState::BootDevices);
     // Initialize devices (display, touch, LVGL) first so we can show splash early
     if (devices_init() != ESP_OK)
     {
@@ -94,7 +91,7 @@ extern "C" void app_main(void)
     ui::splash::show(&enter_config_mode);
     ui::splash::update_state(10, "WiFi..."); // Display/devices ready
 
-    g_app_state = AppState::BootWifi;
+    set_app_state(AppState::BootWifi);
     if (wifi_manager_init() != ESP_OK)
     {
         ESP_LOGE(TAG_APP, "WiFi manager init failed");
@@ -118,10 +115,27 @@ extern "C" void app_main(void)
     // Log all events from the default ESP event loop for inspection/debugging
     (void)event_logger::init();
 
+    // React to WAKE_SCREENSAVER by returning to NormalAwake state.
+    {
+        esp_event_handler_instance_t inst = nullptr;
+        (void)esp_event_handler_instance_register(
+            APP_EVENTS,
+            app_events::WAKE_SCREENSAVER,
+            [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+            {
+                if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                {
+                    return;
+                }
+                set_app_state(AppState::NormalAwake);
+            },
+            nullptr,
+            &inst);
+    }
+
     /* Show splash as early as possible so user sees progress during bootstrap */
 
-    g_app_state = AppState::BootBootstrap;
-
+    set_app_state(AppState::BootBootstrap);
 
     ui::splash::update_state(50, "Подключение..."); // WiFi + display/devices ready
 
@@ -141,7 +155,7 @@ extern "C" void app_main(void)
         ui_app_init();
 
         // Application is now in normal awake mode (rooms UI visible, MQTT running)
-        g_app_state = AppState::NormalAwake;
+        set_app_state(AppState::NormalAwake);
 
         // Start idle controller task to drive screensaver based on LVGL inactivity.
         (void)xTaskCreate(idle_controller_task, "idle_ctrl", 4096, nullptr, 2, nullptr);

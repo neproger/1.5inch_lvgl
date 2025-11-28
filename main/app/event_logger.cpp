@@ -104,6 +104,33 @@ namespace event_logger
                              (int)ok);
                     break;
                 }
+                case app_events::APP_STATE_CHANGED:
+                {
+                    auto *p = static_cast<const app_events::AppStateChangedPayload *>(event_data);
+                    int old_state = p ? p->old_state : -1;
+                    int new_state = p ? p->new_state : -1;
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=APP_STATE_CHANGED old=%d new=%d",
+                             base_str,
+                             old_state,
+                             new_state);
+                    break;
+                }
+                case app_events::REQUEST_CONFIG_MODE:
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=REQUEST_CONFIG_MODE",
+                             base_str);
+                    break;
+                case app_events::REQUEST_SLEEP:
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=REQUEST_SLEEP",
+                             base_str);
+                    break;
+                case app_events::REQUEST_WAKE:
+                    ESP_LOGI(TAG,
+                             "event: base=%s id=REQUEST_WAKE",
+                             base_str);
+                    break;
                 default:
                     ESP_LOGI(TAG,
                              "event: base=%s id=%ld (APP_EVENTS unknown)",

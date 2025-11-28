@@ -12,6 +12,8 @@
 #include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
+#include "app/app_state.hpp"
+#include "app/app_events.hpp"
 
 namespace ui
 {
@@ -26,10 +28,15 @@ namespace ui
         lv_obj_t *s_week_day_label = nullptr;
 
         static lv_timer_t *s_clock_timer = nullptr;
+        static lv_timer_t *s_backlight_timer = nullptr;
         static bool s_active = false;
+        static bool s_backlight_off = false;
+        static esp_event_handler_instance_t s_app_state_handler = nullptr;
 
         static void clock_timer_cb(lv_timer_t *timer);
+        static void backlight_timer_cb(lv_timer_t *timer);
         static void enter_light_sleep(void);
+        static void on_app_state_changed(const app_events::AppStateChangedPayload *payload);
 
         void ui_build_screensaver()
         {
@@ -93,6 +100,24 @@ namespace ui
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
             }
 
+            if (s_app_state_handler == nullptr)
+            {
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::APP_STATE_CHANGED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
+                    {
+                        if (base != APP_EVENTS || id != app_events::APP_STATE_CHANGED || !event_data)
+                        {
+                            return;
+                        }
+                        const auto *p = static_cast<const app_events::AppStateChangedPayload *>(event_data);
+                        on_app_state_changed(p);
+                    },
+                    nullptr,
+                    &s_app_state_handler);
+            }
+
             lvgl_port_unlock();
         }
 
@@ -113,6 +138,15 @@ namespace ui
             {
                 lv_disp_load_scr(s_screensaver_root);
                 s_active = true;
+                s_backlight_off = false;
+
+                if (s_backlight_timer)
+                {
+                    lv_timer_del(s_backlight_timer);
+                    s_backlight_timer = nullptr;
+                }
+                // After 5 seconds of screensaver activity, turn off the display
+                s_backlight_timer = lv_timer_create(backlight_timer_cb, 5000, nullptr);
             }
 
             lvgl_port_unlock();
@@ -125,6 +159,7 @@ namespace ui
                 lv_disp_load_scr(room_root);
                 (void)devices_display_set_enabled(true);
                 s_active = false;
+                s_backlight_off = false;
             }
         }
 
@@ -331,6 +366,21 @@ namespace ui
 
         static const char *TAG = "screensaver";
 
+        static void backlight_timer_cb(lv_timer_t *timer)
+        {
+            (void)timer;
+            if (!s_active || s_backlight_off)
+            {
+                return;
+            }
+
+            ESP_LOGI(TAG, "Screensaver: turning display off after idle");
+            if (devices_display_set_enabled(false) == ESP_OK)
+            {
+                s_backlight_off = true;
+            }
+        }
+
         static void enter_light_sleep(void)
         {
             ESP_LOGI(TAG, "Entering light sleep...");
@@ -348,6 +398,33 @@ namespace ui
             esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
             ESP_LOGI(TAG, "Light sleep returned: err=%s, cause=%d", esp_err_to_name(err), (int)cause);
             lv_display_trigger_activity(nullptr);
+        }
+
+        static void on_app_state_changed(const app_events::AppStateChangedPayload *payload)
+        {
+            if (!payload)
+            {
+                return;
+            }
+
+            AppState new_state = static_cast<AppState>(payload->new_state);
+            switch (new_state)
+            {
+            case AppState::NormalScreensaver:
+                show();
+                break;
+            case AppState::NormalAwake:
+                // Leaving screensaver: ensure display is on
+                if (s_backlight_off)
+                {
+                    (void)devices_display_set_enabled(true);
+                    s_backlight_off = false;
+                }
+                s_active = false;
+                break;
+            default:
+                break;
+            }
         }
 
     } // namespace screensaver
