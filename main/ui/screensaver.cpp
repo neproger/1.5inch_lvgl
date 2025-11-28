@@ -25,14 +25,9 @@ namespace ui
         lv_obj_t *s_date_label = nullptr;
         lv_obj_t *s_week_day_label = nullptr;
 
-        static lv_timer_t *s_idle_timer = nullptr;
         static lv_timer_t *s_clock_timer = nullptr;
         static bool s_active = false;
-        static bool s_backlight_off = false;
-        static const uint32_t kScreensaverTimeoutMs = 10000;
-        static const uint32_t kBacklightOffAfterScreensaverMs = 30000;
 
-        static void idle_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
         static void enter_light_sleep(void);
 
@@ -93,10 +88,6 @@ namespace ui
             ui_build_screensaver();
             ui_update_weather_and_clock();
 
-            if (s_idle_timer == nullptr)
-            {
-                s_idle_timer = lv_timer_create(idle_timer_cb, 500, nullptr);
-            }
             if (s_clock_timer == nullptr)
             {
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
@@ -112,6 +103,8 @@ namespace ui
 
         void show()
         {
+            lvgl_port_lock(0);
+
             if (!s_screensaver_root)
             {
                 ui_build_screensaver();
@@ -121,6 +114,8 @@ namespace ui
                 lv_disp_load_scr(s_screensaver_root);
                 s_active = true;
             }
+
+            lvgl_port_unlock();
         }
 
         void hide_to_room(lv_obj_t *room_root)
@@ -129,7 +124,6 @@ namespace ui
             {
                 lv_disp_load_scr(room_root);
                 (void)devices_display_set_enabled(true);
-                s_backlight_off = false;
                 s_active = false;
             }
         }
@@ -323,47 +317,6 @@ namespace ui
                     lv_label_set_text(s_date_label, date_buf);
                 if (s_week_day_label)
                     lv_label_set_text(s_week_day_label, kWeekdayNames[weekday]);
-            }
-        }
-
-        static void idle_timer_cb(lv_timer_t *timer)
-        {
-            (void)timer;
-
-            lv_display_t *disp = lv_display_get_default();
-            if (!disp)
-            {
-                return;
-            }
-
-            uint32_t inactive_ms = lv_display_get_inactive_time(disp);
-
-            if (!s_active)
-            {
-                if (inactive_ms >= kScreensaverTimeoutMs)
-                {
-                    show();
-                }
-            }
-            else
-            {
-                // Screensaver already active.
-                if (inactive_ms >= (kScreensaverTimeoutMs + kBacklightOffAfterScreensaverMs))
-                {
-                    if (!s_backlight_off)
-                    {
-                        ESP_LOGI("screensaver", "Screensaver: dimming backlight (panel off)");
-                        (void)devices_display_set_enabled(false);
-                        s_backlight_off = true;
-                    }
-                }
-                else if (s_backlight_off)
-                {
-                    // Recent activity with saver still shown: turn display back on once.
-                    ESP_LOGI("screensaver", "Screensaver: restoring backlight (panel on)");
-                    (void)devices_display_set_enabled(true);
-                    s_backlight_off = false;
-                }
             }
         }
 

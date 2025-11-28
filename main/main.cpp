@@ -23,41 +23,51 @@
 
 static const char *TAG_APP = "app";
 
-/* static void gpio_debug_task(void *arg)
+enum class AppState
+{
+    BootDevices,
+    BootWifi,
+    BootBootstrap,
+    NormalAwake,
+    NormalScreensaver,
+    NormalSleep,
+    ConfigMode,
+};
+
+static AppState g_app_state = AppState::BootDevices;
+
+// Simple application-level idle controller for screensaver.
+// For now it only decides when to show the screensaver; backlight
+// dimming/sleep can be added later under the same pattern.
+static void idle_controller_task(void *arg)
 {
     (void)arg;
 
-    gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << BSP_WAKE_GPIO) | (1ULL << GPIO_NUM_40);
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    gpio_config(&io_conf);
+    static constexpr uint32_t kScreensaverTimeoutMs = 10000;
 
-    int last_39 = -1;
-    int last_40 = -1;
-
-    while (true)
+    for (;;)
     {
-        int level_39 = gpio_get_level(GPIO_NUM_39);
-        int level_40 = gpio_get_level(GPIO_NUM_40);
+        lvgl_port_lock(0);
+        lv_display_t *disp = lv_display_get_default();
+        uint32_t inactive_ms = disp ? lv_display_get_inactive_time(disp) : 0;
+        lvgl_port_unlock();
 
-        if (level_39 != last_39)
+        switch (g_app_state)
         {
-            ESP_LOGI("gpio_debug", "GPIO39=%d", level_39);
-            last_39 = level_39;
+        case AppState::NormalAwake:
+            if (inactive_ms >= kScreensaverTimeoutMs && !ui::screensaver::is_active())
+            {
+                ui::screensaver::show();
+                g_app_state = AppState::NormalScreensaver;
+            }
+            break;
+        default:
+            break;
         }
 
-        if (level_40 != last_40)
-        {
-            ESP_LOGI("gpio_debug", "GPIO40=%d", level_40);
-            last_40 = level_40;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(200));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-} */
+}
 
 static void enter_config_mode()
 {
@@ -74,6 +84,7 @@ static void enter_config_mode()
 
 extern "C" void app_main(void)
 {
+    g_app_state = AppState::BootDevices;
     // Initialize devices (display, touch, LVGL) first so we can show splash early
     if (devices_init() != ESP_OK)
     {
@@ -83,6 +94,7 @@ extern "C" void app_main(void)
     ui::splash::show(&enter_config_mode);
     ui::splash::update_state(10, "WiFi..."); // Display/devices ready
 
+    g_app_state = AppState::BootWifi;
     if (wifi_manager_init() != ESP_OK)
     {
         ESP_LOGE(TAG_APP, "WiFi manager init failed");
@@ -98,9 +110,6 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored; use setup button on splash");
     }
 
-    // Debug task to monitor GPIO39/40 levels
-    // xTaskCreate(gpio_debug_task, "gpio_debug", 2048, nullptr, 1, nullptr);
-
     // Initialize application-level input mapping
     (void)input_controller::init();
     // Initialize toggle controller (handles TOGGLE_REQUEST/RESULT)
@@ -110,6 +119,9 @@ extern "C" void app_main(void)
     (void)event_logger::init();
 
     /* Show splash as early as possible so user sees progress during bootstrap */
+
+    g_app_state = AppState::BootBootstrap;
+
 
     ui::splash::update_state(50, "Подключение..."); // WiFi + display/devices ready
 
@@ -127,7 +139,13 @@ extern "C" void app_main(void)
         // Build screensaver first so ui_app_init can attach input callbacks to it
         ui::screensaver::init_support();
         ui_app_init();
-        
+
+        // Application is now in normal awake mode (rooms UI visible, MQTT running)
+        g_app_state = AppState::NormalAwake;
+
+        // Start idle controller task to drive screensaver based on LVGL inactivity.
+        (void)xTaskCreate(idle_controller_task, "idle_ctrl", 4096, nullptr, 2, nullptr);
+
         ui::splash::destroy();
 
         http_manager::start_weather_polling();
