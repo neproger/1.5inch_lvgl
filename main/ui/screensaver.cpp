@@ -88,6 +88,8 @@ namespace ui
 
         void init_support()
         {
+            lvgl_port_lock(0);
+
             ui_build_screensaver();
             ui_update_weather_and_clock();
 
@@ -99,6 +101,8 @@ namespace ui
             {
                 s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
             }
+
+            lvgl_port_unlock();
         }
 
         bool is_active()

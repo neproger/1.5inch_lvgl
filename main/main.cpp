@@ -61,6 +61,7 @@ static const char *TAG_APP = "app";
 
 static void enter_config_mode()
 {
+    ui::splash::update_state(100, "Настройка...");
     // Start configuration access point + HTTP UI and park main task.
     (void)wifi_manager_start_ap_config("esp32-ha-setup", nullptr);
     (void)config_server::start();
@@ -73,6 +74,15 @@ static void enter_config_mode()
 
 extern "C" void app_main(void)
 {
+    // Initialize devices (display, touch, LVGL) first so we can show splash early
+    if (devices_init() != ESP_OK)
+    {
+        return;
+    }
+
+    ui::splash::show(&enter_config_mode);
+    ui::splash::update_state(10, "WiFi..."); // Display/devices ready
+
     if (wifi_manager_init() != ESP_OK)
     {
         ESP_LOGE(TAG_APP, "WiFi manager init failed");
@@ -84,18 +94,10 @@ extern "C" void app_main(void)
 
     if (!config_store::has_basic_config())
     {
-        // No Wi‑Fi/HA config stored: enter setup mode.
-        enter_config_mode();
+        // No Wi-Fi/HA config stored: user can enter setup from splash button.
+        ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored; use setup button on splash");
     }
 
-    if (devices_init() != ESP_OK)
-    {
-        return;
-    }
-    lvgl_port_lock(0);
-    ui::splash::show();
-    ui::splash::update_progress(10); // WiFi + display/devices ready
-    lvgl_port_unlock();
     // Debug task to monitor GPIO39/40 levels
     // xTaskCreate(gpio_debug_task, "gpio_debug", 2048, nullptr, 1, nullptr);
 
@@ -108,36 +110,26 @@ extern "C" void app_main(void)
     (void)event_logger::init();
 
     /* Show splash as early as possible so user sees progress during bootstrap */
-    lvgl_port_lock(0);
-    ui::splash::update_progress(30); // WiFi + display/devices ready
-    lvgl_port_unlock();
+
+    ui::splash::update_state(50, "Подключение..."); // WiFi + display/devices ready
 
     if (!http_manager::bootstrap_state())
     {
         ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, entering config mode");
-        enter_config_mode();
+        ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored; use setup button on splash");
     }
+    else
+    {
+        ui::splash::update_state(100, "Готово");
+        wifi_manager_start_auto(-85, 15000); // Keep Wi-Fi connected in background after bootstrap
+        (void)router::start();               // Start connectivity via Router (currently MQTT)
 
-    lvgl_port_lock(0);
-    ui::splash::update_progress(60); // State bootstrap finished
-    lvgl_port_unlock();
+        // Build screensaver first so ui_app_init can attach input callbacks to it
+        ui::screensaver::init_support();
+        ui_app_init();
+        
+        ui::splash::destroy();
 
-    wifi_manager_start_auto(-85, 15000); // Keep Wi-Fi connected in background after bootstrap
-    (void)router::start();               // Start connectivity via Router (currently MQTT)
-
-    lvgl_port_lock(0);
-    ui::splash::update_progress(80); // Connectivity ready
-    lvgl_port_unlock();
-
-    /* Create your UI under LVGL mutex */
-    lvgl_port_lock(0);
-    // Build screensaver first so ui_app_init can attach input callbacks to it
-    ui::screensaver::init_support();
-    ui_app_init();
-    ui::splash::update_progress(100); // UI fully initialized
-    ui::splash::destroy();
-    lvgl_port_unlock();
-
-    
-    http_manager::start_weather_polling();
+        http_manager::start_weather_polling();
+    }
 }

@@ -18,6 +18,8 @@ static void root_input_cb(lv_event_t *e);
 
 void ui_app_init(void)
 {
+    lvgl_port_lock(0);
+
     // Build UI room pages
     ui_build_room_pages();
 
@@ -61,6 +63,8 @@ void ui_app_init(void)
     }
 
     // Optional: additional UI-level subscriptions can be added here later
+
+    lvgl_port_unlock();
 }
 
 static void root_input_cb(lv_event_t *e)

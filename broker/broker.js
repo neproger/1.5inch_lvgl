@@ -69,7 +69,7 @@ function preview(buf) {
     return BROKER_LOG_HEX ? b.toString('hex') : buf.toString('utf8');
 }
 
-// Simple in‑memory entity states used by MQTT emulation
+// Simple in-memory entity states used by MQTT emulation
 const entityStates = {
     'switch.wifi_breaker_t_switch_1': 'OFF',
     'switch.wifi_breaker_t_switch_2': 'OFF',
@@ -185,9 +185,9 @@ const httpServer = http.createServer((req, res) => {
                 const now = new Date();
 
                 const year = now.getFullYear();
-                const month = now.getMonth() + 1;      // 0–11 → +1
+                const month = now.getMonth() + 1;      // 0–11 -> +1
                 const day = now.getDate();
-                const weekday = now.getDay();           // 0–6 (вс → сб)
+                const weekday = now.getDay();          // 0–6 (вс-пн)
                 const hour = String(now.getHours()).padStart(2, '0');
                 const minute = String(now.getMinutes()).padStart(2, '0');
                 const second = String(now.getSeconds()).padStart(2, '0');
@@ -197,18 +197,18 @@ const httpServer = http.createServer((req, res) => {
                     `14.2,cloudy,${year},${month},${day},${weekday},${hour},${minute},${second}\n`
                 );
             } else {
-                // Default bootstrap CSV with areas/entities
+                // Default bootstrap CSV with areas/entities, using current in-memory states
                 res.end(
                     'AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n' +
                     '\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,on\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Подсветка,on\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетка_2,on\n' +
-                    'kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Люстра,on\n' +
-                    'koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,on\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_6,Освещение,on\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_7,Люстра,on\n' +
-                    'spalnia,Спальня,switch.wifi_breaker_t_switch_8,Розетка,on\n'
+                    `kukhnia,Кухня,switch.wifi_breaker_t_switch_1,Освещение,${entityStates['switch.wifi_breaker_t_switch_1']}\n` +
+                    `kukhnia,Кухня,switch.wifi_breaker_t_switch_2,Розетки_кухня,${entityStates['switch.wifi_breaker_t_switch_2']}\n` +
+                    `kukhnia,Кухня,switch.wifi_breaker_t_switch_3,Розетки_бар,${entityStates['switch.wifi_breaker_t_switch_3']}\n` +
+                    `kukhnia,Кухня,switch.wifi_breaker_t_switch_4,Посудомойка,${entityStates['switch.wifi_breaker_t_switch_4']}\n` +
+                    `koridor,Коридор,switch.wifi_breaker_t_switch_5,Освещение,${entityStates['switch.wifi_breaker_t_switch_5']}\n` +
+                    `spalnia,Спальня,switch.wifi_breaker_t_switch_6,Освещение,${entityStates['switch.wifi_breaker_t_switch_6']}\n` +
+                    `spalnia,Спальня,switch.wifi_breaker_t_switch_7,Посудомойка,${entityStates['switch.wifi_breaker_t_switch_7']}\n` +
+                    `spalnia,Спальня,switch.wifi_breaker_t_switch_8,Розетки_спальня,${entityStates['switch.wifi_breaker_t_switch_8']}\n`
                 );
             }
         });
