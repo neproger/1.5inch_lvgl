@@ -10,7 +10,6 @@ enum class AppState
     BootBootstrap,
     NormalAwake,
     NormalScreensaver,
-    NormalSleep,
     ConfigMode,
 };
 

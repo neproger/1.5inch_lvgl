@@ -62,11 +62,6 @@ namespace event_logger
                              delta);
                     break;
                 }
-                case app_events::WAKE_SCREENSAVER:
-                    ESP_LOGI(TAG,
-                             "event: base=%s id=WAKE_SCREENSAVER",
-                             base_str);
-                    break;
                 case app_events::TOGGLE_CURRENT_ENTITY:
                     ESP_LOGI(TAG,
                              "event: base=%s id=TOGGLE_CURRENT_ENTITY",
@@ -133,8 +128,9 @@ namespace event_logger
                     break;
                 default:
                     ESP_LOGI(TAG,
-                             "event: base=%s id=%ld (APP_EVENTS unknown)",
+                             "event: base=%s id=%s (%ld)",
                              base_str,
+                             app_events::id_to_string(event_id),
                              static_cast<long>(event_id));
                     break;
                 }

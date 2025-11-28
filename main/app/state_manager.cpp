@@ -304,10 +304,16 @@ namespace state
 
     void set_weather(float temperature_c, const std::string &condition)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        g_weather.temperature_c = temperature_c;
-        g_weather.condition = condition;
-        g_weather.valid = true;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            g_weather.temperature_c = temperature_c;
+            g_weather.condition = condition;
+            g_weather.valid = true;
+        }
+
+        // Notify UI that weather state was updated
+        std::int64_t now_us = esp_timer_get_time();
+        (void)app_events::post_weather_updated(now_us, false);
     }
 
     WeatherState weather()
@@ -325,31 +331,37 @@ namespace state
                    int second,
                    std::int64_t monotonic_us)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
 
-        // Basic range clamping
-        if (hour < 0)
-            hour = 0;
-        if (hour > 23)
-            hour = 23;
-        if (minute < 0)
-            minute = 0;
-        if (minute > 59)
-            minute = 59;
-        if (second < 0)
-            second = 0;
-        if (second > 59)
-            second = 59;
+            // Basic range clamping
+            if (hour < 0)
+                hour = 0;
+            if (hour > 23)
+                hour = 23;
+            if (minute < 0)
+                minute = 0;
+            if (minute > 59)
+                minute = 59;
+            if (second < 0)
+                second = 0;
+            if (second > 59)
+                second = 59;
 
-        g_clock.year = year;
-        g_clock.month = month;
-        g_clock.day = day;
-        g_clock.weekday = weekday;
-        g_clock.base_seconds = static_cast<std::int64_t>(hour) * 3600 +
-                               static_cast<std::int64_t>(minute) * 60 +
-                               static_cast<std::int64_t>(second);
-        g_clock.sync_monotonic_us = monotonic_us;
-        g_clock.valid = true;
+            g_clock.year = year;
+            g_clock.month = month;
+            g_clock.day = day;
+            g_clock.weekday = weekday;
+            g_clock.base_seconds = static_cast<std::int64_t>(hour) * 3600 +
+                                   static_cast<std::int64_t>(minute) * 60 +
+                                   static_cast<std::int64_t>(second);
+            g_clock.sync_monotonic_us = monotonic_us;
+            g_clock.valid = true;
+        }
+
+        // Notify UI that clock state was updated
+        std::int64_t now_us = esp_timer_get_time();
+        (void)app_events::post_clock_updated(now_us, false);
     }
 
     ClockState clock()

@@ -10,6 +10,7 @@
 #include "switch.hpp"
 #include "screensaver.hpp"
 #include "app/app_events.hpp"
+#include "app/app_state.hpp"
 
 #include <cstdio>
 
@@ -19,7 +20,7 @@ namespace ui
     {
         static const char *TAG_UI_ROOMS = "UI_ROOMS";
         static bool s_nav_handler_registered = false;
-        static bool s_wake_handler_registered = false;
+        static bool s_state_handler_registered = false;
         static bool s_entity_handler_registered = false;
 
         std::vector<RoomPage> s_room_pages;
@@ -182,15 +183,27 @@ namespace ui
                 s_nav_handler_registered = true;
             }
 
-            if (!s_wake_handler_registered)
+            if (!s_state_handler_registered)
             {
                 esp_event_handler_instance_t inst = nullptr;
                 (void)esp_event_handler_instance_register(
                     APP_EVENTS,
-                    app_events::WAKE_SCREENSAVER,
-                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    app_events::APP_STATE_CHANGED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
                     {
-                        if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                        if (base != APP_EVENTS || id != app_events::APP_STATE_CHANGED || !event_data)
+                        {
+                            return;
+                        }
+
+                        const auto *payload = static_cast<const app_events::AppStateChangedPayload *>(event_data);
+                        if (!payload)
+                        {
+                            return;
+                        }
+
+                        AppState new_state = static_cast<AppState>(payload->new_state);
+                        if (new_state != AppState::NormalAwake)
                         {
                             return;
                         }
@@ -222,7 +235,7 @@ namespace ui
                     },
                     nullptr,
                     &inst);
-                s_wake_handler_registered = true;
+                s_state_handler_registered = true;
             }
 
             if (!s_entity_handler_registered)
