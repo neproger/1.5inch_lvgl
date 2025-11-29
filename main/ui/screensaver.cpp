@@ -195,17 +195,6 @@ namespace ui
             lvgl_port_unlock();
         }
 
-        void hide_to_room(lv_obj_t *room_root)
-        {
-            if (room_root)
-            {
-                lv_disp_load_scr(room_root);
-                (void)devices_display_set_enabled(true);
-                s_active = false;
-                s_backlight_off = false;
-            }
-        }
-
         void ui_update_weather_and_clock()
         {
             on_weather_updated();

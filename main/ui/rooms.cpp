@@ -208,11 +208,6 @@ namespace ui
                             return;
                         }
 
-                        if (!ui::screensaver::is_active())
-                        {
-                            return;
-                        }
-
                         lvgl_port_lock(-1);
 
                         if (!s_room_pages.empty())
@@ -224,7 +219,7 @@ namespace ui
                                 {
                                     s_current_room_index = 0;
                                 }
-                                ui::screensaver::hide_to_room(s_room_pages[s_current_room_index].root);
+                                lv_disp_load_scr(s_room_pages[s_current_room_index].root);
                                 // Prevent the same touch from being delivered
                                 // to widgets on the newly shown room screen.
                                 lv_indev_reset(NULL, nullptr);

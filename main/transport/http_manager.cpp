@@ -399,8 +399,7 @@ namespace http_manager
 
     bool bootstrap_state()
     {
-        static constexpr int kMaxAttempts = 3;
-        for (int attempt = 1; attempt <= kMaxAttempts; ++attempt)
+        for (int attempt = 1;; ++attempt)
         {
             if (!ensure_wifi_connected())
             {
@@ -411,7 +410,7 @@ namespace http_manager
             {
                 return true;
             }
-            ESP_LOGW(TAG, "Bootstrap attempt %d/%d failed", attempt, kMaxAttempts);
+            ESP_LOGW(TAG, "Bootstrap attempt %d failed", attempt);
             vTaskDelay(pdMS_TO_TICKS(3000));
         }
         return false;
