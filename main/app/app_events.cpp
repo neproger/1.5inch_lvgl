@@ -137,36 +137,6 @@ namespace app_events
         return err;
     }
 
-    esp_err_t post_wake_screensaver(std::int64_t timestamp_us, bool from_isr)
-    {
-        WakeScreensaverPayload payload;
-        payload.timestamp_us = timestamp_us;
-
-        esp_err_t err;
-        if (from_isr)
-        {
-            err = esp_event_isr_post(APP_EVENTS,
-                                     WAKE_SCREENSAVER,
-                                     &payload,
-                                     sizeof(payload),
-                                     nullptr);
-        }
-        else
-        {
-            err = esp_event_post(APP_EVENTS,
-                                 WAKE_SCREENSAVER,
-                                 &payload,
-                                 sizeof(payload),
-                                 0);
-        }
-
-        if (err != ESP_OK)
-        {
-            ESP_LOGW(TAG, "post_wake_screensaver failed: %s", esp_err_to_name(err));
-        }
-        return err;
-    }
-
     esp_err_t post_toggle_current_entity(std::int64_t timestamp_us, bool from_isr)
     {
         ToggleCurrentEntityPayload payload;
@@ -381,6 +351,53 @@ namespace app_events
     esp_err_t post_request_wake(std::int64_t timestamp_us, bool from_isr)
     {
         return post_empty_event(REQUEST_WAKE, timestamp_us, from_isr);
+    }
+
+    const char *id_to_string(int32_t id)
+    {
+        switch (id)
+        {
+        case KNOB:
+            return "KNOB";
+        case BUTTON:
+            return "BUTTON";
+        case GESTURE:
+            return "GESTURE";
+        case NAVIGATE_ROOM:
+            return "NAVIGATE_ROOM";
+        case TOGGLE_CURRENT_ENTITY:
+            return "TOGGLE_CURRENT_ENTITY";
+        case ENTITY_STATE_CHANGED:
+            return "ENTITY_STATE_CHANGED";
+        case WEATHER_UPDATED:
+            return "WEATHER_UPDATED";
+        case CLOCK_UPDATED:
+            return "CLOCK_UPDATED";
+        case TOGGLE_REQUEST:
+            return "TOGGLE_REQUEST";
+        case TOGGLE_RESULT:
+            return "TOGGLE_RESULT";
+        case APP_STATE_CHANGED:
+            return "APP_STATE_CHANGED";
+        case REQUEST_CONFIG_MODE:
+            return "REQUEST_CONFIG_MODE";
+        case REQUEST_SLEEP:
+            return "REQUEST_SLEEP";
+        case REQUEST_WAKE:
+            return "REQUEST_WAKE";
+        default:
+            return "UNKNOWN";
+        }
+    }
+
+    esp_err_t post_weather_updated(std::int64_t timestamp_us, bool from_isr)
+    {
+        return post_empty_event(WEATHER_UPDATED, timestamp_us, from_isr);
+    }
+
+    esp_err_t post_clock_updated(std::int64_t timestamp_us, bool from_isr)
+    {
+        return post_empty_event(CLOCK_UPDATED, timestamp_us, from_isr);
     }
 
 } // namespace app_events

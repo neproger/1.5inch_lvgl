@@ -1,8 +1,10 @@
 #include "splash.hpp"
 
 #include "esp_lvgl_port.h"
+#include "esp_timer.h"
 #include "fonts.h"
 #include "icons.h"
+#include "app/app_events.hpp"
 
 namespace ui
 {
@@ -12,7 +14,6 @@ namespace ui
         lv_obj_t *s_splash_bar = nullptr;
         lv_obj_t *s_splash_label = nullptr;
         static lv_obj_t *s_config_button = nullptr;
-        static ConfigCallback s_on_config = nullptr;
 
         static void config_button_event_cb(lv_event_t *e)
         {
@@ -22,19 +23,14 @@ namespace ui
             }
             if (lv_event_get_code(e) == LV_EVENT_CLICKED)
             {
-                if (s_on_config)
-                {
-                    // Call user callback without LVGL lock held
-                    s_on_config();
-                }
+                std::int64_t now_us = esp_timer_get_time();
+                (void)app_events::post_request_config_mode(now_us, false);
             }
         }
 
-        void show(ConfigCallback on_config)
+        void show()
         {
             lvgl_port_lock(0);
-
-            s_on_config = on_config;
 
             if (s_splash_root)
             {
@@ -143,7 +139,6 @@ namespace ui
             s_splash_bar = nullptr;
             s_splash_label = nullptr;
             s_config_button = nullptr;
-            s_on_config = nullptr;
 
             lvgl_port_unlock();
         }

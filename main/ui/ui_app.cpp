@@ -106,7 +106,7 @@ static void root_input_cb(lv_event_t *e)
         lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_target(e));
         if (target == s_screensaver_root)
         {
-            (void)app_events::post_wake_screensaver(now_us, false);
+            (void)app_events::post_request_wake(now_us, false);
         }
     }
 }

@@ -9,6 +9,7 @@ idf_component_register(
         "ui/ui_app.cpp"
         "ui/rooms.cpp"
         "ui/screensaver.cpp"
+        "ui/locale_ru.cpp"
         "ui/splash.cpp"
         "ui/switch.cpp"
         "transport/wifi_manager.c"

@@ -88,7 +88,7 @@ extern "C" void app_main(void)
         return;
     }
 
-    ui::splash::show(&enter_config_mode);
+    ui::splash::show();
     ui::splash::update_state(10, "WiFi..."); // Display/devices ready
 
     set_app_state(AppState::BootWifi);
@@ -115,19 +115,41 @@ extern "C" void app_main(void)
     // Log all events from the default ESP event loop for inspection/debugging
     (void)event_logger::init();
 
-    // React to WAKE_SCREENSAVER by returning to NormalAwake state.
+    // React to REQUEST_CONFIG_MODE by entering config mode via FSM.
     {
         esp_event_handler_instance_t inst = nullptr;
         (void)esp_event_handler_instance_register(
             APP_EVENTS,
-            app_events::WAKE_SCREENSAVER,
+            app_events::REQUEST_CONFIG_MODE,
             [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
             {
-                if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                if (base != APP_EVENTS || id != app_events::REQUEST_CONFIG_MODE)
                 {
                     return;
                 }
-                set_app_state(AppState::NormalAwake);
+                set_app_state(AppState::ConfigMode);
+                enter_config_mode();
+            },
+            nullptr,
+            &inst);
+    }
+
+    // React to REQUEST_WAKE by transitioning back to NormalAwake.
+    {
+        esp_event_handler_instance_t inst = nullptr;
+        (void)esp_event_handler_instance_register(
+            APP_EVENTS,
+            app_events::REQUEST_WAKE,
+            [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+            {
+                if (base != APP_EVENTS || id != app_events::REQUEST_WAKE)
+                {
+                    return;
+                }
+                if (g_app_state == AppState::NormalScreensaver)
+                {
+                    set_app_state(AppState::NormalAwake);
+                }
             },
             nullptr,
             &inst);
