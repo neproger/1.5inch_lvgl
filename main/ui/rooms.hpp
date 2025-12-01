@@ -29,7 +29,7 @@ namespace ui
             std::string area_name;
             lv_obj_t *root = nullptr;
             lv_obj_t *title_label = nullptr;
-            lv_obj_t *list_container = nullptr;
+            lv_obj_t *tileview = nullptr;
             std::vector<DeviceWidget> devices;
         };
 

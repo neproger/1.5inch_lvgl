@@ -6,6 +6,8 @@
 #include "esp_event.h"
 #include "app/app_events.hpp"
 #include "rooms.hpp"
+#include "state_manager.hpp"
+#include "fonts.h"
 
 namespace ui
 {
@@ -44,6 +46,38 @@ namespace ui
                 lv_obj_add_state(control, LV_STATE_DISABLED);
             }
         }
+
+        void ui_add_switch_widget(
+            lv_obj_t *parent,
+            const state::Entity &ent,
+            lv_obj_t *&out_label,
+            lv_obj_t *&out_control)
+        {
+            out_label = nullptr;
+            out_control = nullptr;
+
+            if (!parent)
+            {
+                return;
+            }
+
+            lv_obj_t *label = lv_label_create(parent);
+            lv_label_set_text(label, ent.name.c_str());
+            lv_obj_set_style_text_color(label, lv_color_hex(0xE6E6E6), 0);
+            lv_obj_set_style_text_font(label, &Montserrat_40, 0);
+
+            lv_obj_t *control = lv_switch_create(parent);
+            lv_obj_set_style_width(control, 160, LV_PART_MAIN);
+            lv_obj_set_style_height(control, 70, LV_PART_MAIN);
+
+            bool is_on = (ent.state == "on" || ent.state == "ON" ||
+                          ent.state == "true" || ent.state == "TRUE" ||
+                          ent.state == "1");
+            set_switch_state(control, is_on);
+
+            out_label = label;
+            out_control = control;
+        }
     } // namespace controls
 
     namespace toggle
@@ -62,7 +96,7 @@ namespace ui
             }
             lv_obj_t *scr = lv_screen_active();
             s_spinner = lv_spinner_create(scr);
-            lv_obj_set_size(s_spinner, 24, 24);
+            lv_obj_set_size(s_spinner, 50, 50);
             lv_obj_align(s_spinner, LV_ALIGN_BOTTOM_MID, 0, -10);
         }
 
