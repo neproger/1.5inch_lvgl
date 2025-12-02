@@ -9,10 +9,32 @@
 #include "state_manager.hpp"
 #include "fonts.h"
 
+#include <vector>
+#include <utility>
+
 namespace ui
 {
     namespace controls
     {
+        static std::vector<std::pair<lv_obj_t *, lv_obj_t *>> s_switch_rings;
+        static lv_obj_t *find_ring_for_control(lv_obj_t *control)
+        {
+            if (!control)
+            {
+                return nullptr;
+            }
+
+            for (auto &entry : s_switch_rings)
+            {
+                if (entry.first == control)
+                {
+                    return entry.second;
+                }
+            }
+
+            return nullptr;
+        }
+
         void set_switch_state(lv_obj_t *control, bool is_on)
         {
             if (!control)
@@ -27,6 +49,13 @@ namespace ui
             else
             {
                 lv_obj_clear_state(control, LV_STATE_CHECKED);
+            }
+
+            lv_obj_t *ring = find_ring_for_control(control);
+            if (ring)
+            {
+                lv_color_t color = is_on ? lv_color_hex(0x00FF00) : lv_color_hex(0xFF0000);
+                lv_obj_set_style_arc_color(ring, color, LV_PART_INDICATOR);
             }
         }
 
@@ -51,32 +80,62 @@ namespace ui
             lv_obj_t *parent,
             const state::Entity &ent,
             lv_obj_t *&out_label,
-            lv_obj_t *&out_control)
+            lv_obj_t *&out_control,
+            lv_obj_t *&out_ring)
         {
             out_label = nullptr;
             out_control = nullptr;
+            out_ring = nullptr;
 
             if (!parent)
             {
                 return;
             }
 
-            lv_obj_t *label = lv_label_create(parent);
-            lv_label_set_text(label, ent.name.c_str());
-            lv_obj_set_style_text_color(label, lv_color_hex(0xE6E6E6), 0);
-            lv_obj_set_style_text_font(label, &Montserrat_40, 0);
-
-            lv_obj_t *control = lv_switch_create(parent);
-            lv_obj_set_style_width(control, 160, LV_PART_MAIN);
-            lv_obj_set_style_height(control, 70, LV_PART_MAIN);
-
             bool is_on = (ent.state == "on" || ent.state == "ON" ||
                           ent.state == "true" || ent.state == "TRUE" ||
                           ent.state == "1");
+
+            // Create ring inside tile (same parent as label/switch)
+            lv_obj_t *ring = lv_arc_create(parent);
+            lv_obj_remove_style_all(ring);
+            lv_obj_set_size(ring, LV_HOR_RES, LV_VER_RES);
+            lv_obj_center(ring);
+            lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_clear_flag(ring, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+            lv_arc_set_bg_angles(ring, 0, 360);
+            lv_arc_set_angles(ring, 0, 360);
+
+            lv_obj_set_style_arc_width(ring, 4, LV_PART_MAIN);
+            lv_obj_set_style_arc_opa(ring, LV_OPA_TRANSP, LV_PART_MAIN);
+
+            lv_obj_set_style_arc_width(ring, 4, LV_PART_INDICATOR);
+            lv_obj_set_style_arc_opa(ring, LV_OPA_COVER, LV_PART_INDICATOR);
+            lv_obj_center(ring);
+
+            // Create label inside tile container so flex layout works
+            lv_obj_t *label = lv_label_create(ring);
+            lv_label_set_text(label, ent.name.c_str());
+            lv_obj_set_style_text_color(label, lv_color_hex(0xE6E6E6), 0);
+            lv_obj_set_style_text_font(label, &Montserrat_40, 0);
+            lv_obj_align_to(label, ring, LV_ALIGN_CENTER, 0, -20);
+
+            // Create switch inside tile container under label
+            lv_obj_t *control = lv_switch_create(ring);
+            lv_obj_set_style_width(control, 160, LV_PART_MAIN);
+            lv_obj_set_style_height(control, 70, LV_PART_MAIN);
+            lv_obj_align_to(control, label, LV_ALIGN_OUT_BOTTOM_MID, 0, 30);
+
+
+            s_switch_rings.emplace_back(control, ring);
+
             set_switch_state(control, is_on);
 
             out_label = label;
             out_control = control;
+            out_ring = ring;
         }
     } // namespace controls
 

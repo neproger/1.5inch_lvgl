@@ -21,6 +21,7 @@ namespace ui
             lv_obj_t *container = nullptr;
             lv_obj_t *label = nullptr;
             lv_obj_t *control = nullptr; // e.g. lv_switch
+            lv_obj_t *ring = nullptr;    // ring arc around screen
         };
 
         struct RoomPage

@@ -69,6 +69,13 @@ esp_err_t devices_lvgl_init(esp_lcd_touch_handle_t touch_handle)
 
     // Register rounder callback under LVGL mutex to avoid race
     lvgl_port_lock(-1);
+
+    // Panel active area is shifted by 6 px in X (see 0x2A init in display_init.cpp).
+    // Tell LVGL that logical (0,0) corresponds to physical (6,0).
+#if LVGL_VERSION_MAJOR >= 9
+    lv_display_set_offset(s_lvgl_disp, 6, 0);
+#endif
+
     lv_display_add_event_cb(s_lvgl_disp, sh8601_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lvgl_port_unlock();
 

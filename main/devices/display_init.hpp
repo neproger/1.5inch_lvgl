@@ -25,7 +25,7 @@
 #define PIN_LCD_RST (GPIO_NUM_8)
 #define PIN_BK_LIGHT (GPIO_NUM_17)
 
-#define LCD_H_RES 478
+#define LCD_H_RES 472
 #define LCD_V_RES 466
 
 #if CONFIG_LV_COLOR_DEPTH == 32

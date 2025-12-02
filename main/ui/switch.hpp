@@ -25,7 +25,8 @@ namespace ui
             lv_obj_t *parent,
             const state::Entity &ent,
             lv_obj_t *&out_label,
-            lv_obj_t *&out_control);
+            lv_obj_t *&out_control,
+            lv_obj_t *&out_ring);
     } // namespace controls
 
     namespace toggle

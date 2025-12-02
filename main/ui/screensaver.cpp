@@ -38,7 +38,6 @@ namespace ui
 
         static void backlight_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
-        static void enter_light_sleep(void);
         static void on_app_state_changed(const app_events::AppStateChangedPayload *payload);
         static void on_weather_updated();
         static void on_clock_updated();
@@ -413,25 +412,6 @@ namespace ui
             lvgl_port_lock(-1);
             on_clock_updated();
             lvgl_port_unlock();
-        }
-
-        static void enter_light_sleep(void)
-        {
-            ESP_LOGI(TAG, "Entering light sleep...");
-            gpio_config_t config = {};
-            config.pin_bit_mask = (1ULL << BSP_BTN_PRESS);
-            config.mode = GPIO_MODE_INPUT;
-            config.pull_up_en = GPIO_PULLUP_ENABLE;
-            config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-            config.intr_type = GPIO_INTR_DISABLE;
-            gpio_config(&config);
-            gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
-            esp_sleep_enable_gpio_wakeup();
-
-            esp_err_t err = esp_light_sleep_start();
-            esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-            ESP_LOGI(TAG, "Light sleep returned: err=%s, cause=%d", esp_err_to_name(err), (int)cause);
-            lv_display_trigger_activity(nullptr);
         }
 
         static void on_app_state_changed(const app_events::AppStateChangedPayload *payload)

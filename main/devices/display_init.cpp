@@ -27,6 +27,7 @@ static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x53, (uint8_t[]){0x20}, 1, 10},
     {0x51, (uint8_t[]){0xA0}, 1, 10},
     {0x63, (uint8_t[]){0xFF}, 1, 10},
+    // Column address set: start X=0, end X=477 (478 px, matches LCD_H_RES)
     {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xDD}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 0},
     {0x11, (uint8_t[]){0x00}, 0, 60},

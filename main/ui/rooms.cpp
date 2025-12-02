@@ -89,17 +89,10 @@ namespace ui
                 lv_obj_set_style_border_width(page.root, 0, 0);
                 lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
 
-                page.title_label = lv_label_create(page.root);
-                lv_label_set_text(page.title_label, page.area_name.c_str());
-                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
-                lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
-                lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
-
-                int top = 80;
                 page.tileview = lv_tileview_create(page.root);
                 lv_obj_add_event_cb(page.tileview, tileview_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-                lv_obj_set_size(page.tileview, LV_PCT(100), LV_VER_RES - top);
-                lv_obj_align(page.tileview, LV_ALIGN_TOP_MID, 0, top);
+                lv_obj_set_size(page.tileview, LV_PCT(100), LV_VER_RES);
+                lv_obj_align(page.tileview, LV_ALIGN_TOP_MID, 0, 0);
                 lv_obj_set_style_bg_opa(page.tileview, LV_OPA_TRANSP, 0);
                 lv_obj_set_style_border_width(page.tileview, 0, 0);
                 lv_obj_set_scrollbar_mode(page.tileview, LV_SCROLLBAR_MODE_OFF);
@@ -139,10 +132,17 @@ namespace ui
                         w.container,
                         ent,
                         w.label,
-                        w.control);
+                        w.control,
+                        w.ring);
 
                     page.devices.push_back(std::move(w));
                 }
+
+                page.title_label = lv_label_create(page.root);
+                lv_label_set_text(page.title_label, page.area_name.c_str());
+                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
+                lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
+                lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
 
                 s_room_pages.push_back(std::move(page));
             }
