@@ -54,33 +54,28 @@ esp_err_t devices_lvgl_init(esp_lcd_touch_handle_t touch_handle)
     disp_cfg.hres = LCD_H_RES;
     disp_cfg.vres = LCD_V_RES;
     disp_cfg.monochrome = false;
-#if LVGL_VERSION_MAJOR >= 9
     disp_cfg.color_format = LV_COLOR_FORMAT_RGB565;
-#endif
     disp_cfg.rotation.swap_xy = false;
     disp_cfg.rotation.mirror_x = false;
     disp_cfg.rotation.mirror_y = false;
     disp_cfg.flags.buff_dma = true;
-#if LVGL_VERSION_MAJOR >= 9
     disp_cfg.flags.swap_bytes = true;
-#endif
 
     s_lvgl_disp = lvgl_port_add_disp(&disp_cfg);
-    // Register rounder callback under LVGL mutex to avoid race
-    lvgl_port_lock(-1);
 
+    lvgl_port_lock(-1);
     // Panel active area is shifted by 6 px in X (see 0x2A init in display_init.cpp).
     // Tell LVGL that logical (0,0) corresponds to physical (6,0).
-#if LVGL_VERSION_MAJOR >= 9
     lv_display_set_offset(s_lvgl_disp, 6, 0);
-    lv_color_t primary = lv_color_hex(0xFF9800); // твой новый цвет
+
+    // твой новый цвет
+    lv_color_t primary = lv_color_hex(0xFF9800);
     lv_color_t secondary = lv_color_hex(0x303030);
 
     const lv_font_t *font = LV_FONT_DEFAULT;
 
     lv_theme_t *theme = lv_theme_default_init(s_lvgl_disp, primary, secondary, true, font);
     lv_display_set_theme(s_lvgl_disp, theme);
-#endif
 
     lv_display_add_event_cb(s_lvgl_disp, sh8601_lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
     lvgl_port_unlock();
