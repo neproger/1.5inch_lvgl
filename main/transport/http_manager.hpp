@@ -10,6 +10,10 @@ namespace http_manager
     // Returns true on success, false if all attempts failed.
     bool bootstrap_state();
 
+    // Request bootstrap_state() loop to stop (e.g. when entering config mode).
+    // After this call, bootstrap_state() will eventually return false.
+    void cancel_bootstrap();
+
     // Start periodic weather polling over HTTP.
     // Updates state_manager::set_weather/set_clock() on successful polls.
     void start_weather_polling();

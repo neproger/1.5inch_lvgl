@@ -69,7 +69,9 @@ static void idle_controller_task(void *arg)
 static void enter_config_mode()
 {
     ui::splash::update_state(100, "Настройка...");
-    // Start configuration access point + HTTP UI and park main task.
+    // Stop ongoing bootstrap attempts (if any), then start configuration
+    // access point + HTTP UI and park main task.
+    http_manager::cancel_bootstrap();
     (void)wifi_manager_start_ap_config("esp32-ha-setup", nullptr);
     (void)config_server::start();
     ESP_LOGI(TAG_APP, "Config mode: AP 'esp32-ha-setup' with HTTP config server");
@@ -103,8 +105,11 @@ extern "C" void app_main(void)
 
     if (!config_store::has_basic_config())
     {
-        // No Wi-Fi/HA config stored: user can enter setup from splash button.
-        ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored; use setup button on splash");
+        // No Wi-Fi/HA config stored: immediately enter config mode.
+        ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored, entering config mode");
+        set_app_state(AppState::ConfigMode);
+        enter_config_mode();
+        return;
     }
 
     // Initialize application-level input mapping

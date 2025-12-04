@@ -108,6 +108,16 @@ esp_err_t wifi_manager_init(void)
         }
     }
 
+    if (!s_state.ap_netif)
+    {
+        s_state.ap_netif = esp_netif_create_default_wifi_ap();
+        if (!s_state.ap_netif)
+        {
+            ESP_LOGE(TAG, "Failed to create WiFi AP netif");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "esp_wifi_init failed");
 
@@ -322,16 +332,6 @@ esp_err_t wifi_manager_start_ap_config(const char *ssid, const char *password)
     {
         ESP_LOGE(TAG, "WiFi not initialized, call wifi_manager_init() first");
         return ESP_ERR_INVALID_STATE;
-    }
-
-    if (!s_state.ap_netif)
-    {
-        s_state.ap_netif = esp_netif_create_default_wifi_ap();
-        if (!s_state.ap_netif)
-        {
-            ESP_LOGE(TAG, "Failed to create AP netif");
-            return ESP_ERR_NO_MEM;
-        }
     }
 
     wifi_config_t cfg = {0};

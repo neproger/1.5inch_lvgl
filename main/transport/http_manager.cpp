@@ -22,6 +22,9 @@ namespace http_manager
 
         static const char *TAG = "http_mgr";
 
+        // When set to true, bootstrap_state() should stop retrying and return.
+        static volatile bool s_cancel_bootstrap = false;
+
         struct HaHttpConfig
         {
             std::string url;
@@ -98,31 +101,12 @@ namespace http_manager
         }
 
         static const char *kBootstrapTemplateBody = R"json(
-{"template": "
-    AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE
-    {% for area in areas() -%}
-        {% for e in area_entities(area) -%}
-            {% if e.startswith('light.') or e.startswith('switch.') %}
-                {{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}
-            {% endif %}
-        {% endfor %}
-    {% endfor %}
-"})json";
+{"template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{% if e.startswith('light.') or e.startswith('switch.') %}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endif %}\n{% endfor %}\n{% endfor %}"})json";
+
 
         // Weather template (used by screensaver).
         static const char *kWeatherTemplateBody = R"json(
-{"template":
-    "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second
-    {% set w = states['weather.forecast_home_assistant'] %}\n
-    {{ w.attributes.temperature if w else 'N/A' }},
-    {{ w.state if w else 'N/A' }},{{ now().year }},
-    {{ now().month }},
-    {{ now().day }},
-    {{ now().weekday() }},
-    {{ now().strftime('%H') }},
-    {{ now().strftime('%M') }},
-    {{ now().strftime('%S') }}
-"})json";
+{"template":"Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"})json";
 
         static TaskHandle_t s_weather_task = nullptr;
 
@@ -150,12 +134,24 @@ namespace http_manager
 
         static bool perform_bootstrap_request()
         {
+            if (s_cancel_bootstrap)
+            {
+                ESP_LOGW(TAG, "Bootstrap cancelled before HTTP attempts");
+                return false;
+            }
+
             HaHttpConfig cfgs[4];
             const int cfg_count = build_http_configs(cfgs, 4);
             char buf[2048];
 
             for (int i = 0; i < cfg_count; ++i)
             {
+                if (s_cancel_bootstrap)
+                {
+                    ESP_LOGW(TAG, "Bootstrap cancelled during HTTP attempts");
+                    return false;
+                }
+
                 int status = 0;
                 const char *token = (!cfgs[i].token.empty() && cfgs[i].token[0]) ? cfgs[i].token.c_str() : nullptr;
                 ESP_LOGI(TAG, "Bootstrap: trying HA server %d/%d at %s", i + 1, cfg_count, cfgs[i].url.c_str());
@@ -416,6 +412,11 @@ namespace http_manager
     {
         for (int attempt = 1;; ++attempt)
         {
+            if (s_cancel_bootstrap)
+            {
+                ESP_LOGW(TAG, "Bootstrap cancelled");
+                return false;
+            }
             if (!ensure_wifi_connected())
             {
                 vTaskDelay(pdMS_TO_TICKS(3000));
@@ -429,6 +430,11 @@ namespace http_manager
             vTaskDelay(pdMS_TO_TICKS(3000));
         }
         return false;
+    }
+
+    void cancel_bootstrap()
+    {
+        s_cancel_bootstrap = true;
     }
 
     void start_weather_polling()
