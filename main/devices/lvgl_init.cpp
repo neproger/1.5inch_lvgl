@@ -37,8 +37,8 @@ esp_err_t devices_lvgl_init(esp_lcd_touch_handle_t touch_handle)
     lvgl_cfg.task_priority = 4;
     lvgl_cfg.task_stack = 6144;
     lvgl_cfg.task_affinity = -1;
-    lvgl_cfg.task_max_sleep_ms = 500;
-    lvgl_cfg.timer_period_ms = 8;
+    lvgl_cfg.task_max_sleep_ms = 100;
+    lvgl_cfg.timer_period_ms = 4;
     esp_err_t err = lvgl_port_init(&lvgl_cfg);
     if (err != ESP_OK)
     {
