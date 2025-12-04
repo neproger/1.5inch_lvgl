@@ -14,7 +14,6 @@
 #include <cstring>
 #include <string>
 
-
 namespace http_manager
 {
 
@@ -27,7 +26,7 @@ namespace http_manager
         {
             std::string url;
             std::string token;
-            std::string host;      // Raw host from config_store (without scheme transformation)
+            std::string host; // Raw host from config_store (without scheme transformation)
             std::uint16_t http_port{0};
         };
 
@@ -99,17 +98,31 @@ namespace http_manager
         }
 
         static const char *kBootstrapTemplateBody = R"json(
-{
-  "template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endfor %}\n{% endfor %}"
-}
-)json";
+{"template": "
+    AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE
+    {% for area in areas() -%}
+        {% for e in area_entities(area) -%}
+            {% if e.startswith('light.') or e.startswith('switch.') %}
+                {{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+"})json";
 
         // Weather template (used by screensaver).
         static const char *kWeatherTemplateBody = R"json(
-{
-  "template": "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"
-}
-)json";
+{"template":
+    "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second
+    {% set w = states['weather.forecast_home_assistant'] %}\n
+    {{ w.attributes.temperature if w else 'N/A' }},
+    {{ w.state if w else 'N/A' }},{{ now().year }},
+    {{ now().month }},
+    {{ now().day }},
+    {{ now().weekday() }},
+    {{ now().strftime('%H') }},
+    {{ now().strftime('%M') }},
+    {{ now().strftime('%S') }}
+"})json";
 
         static TaskHandle_t s_weather_task = nullptr;
 
@@ -217,7 +230,8 @@ namespace http_manager
             std::string line;
             size_t pos = 0;
 
-            auto next_line = [&](std::string &out) -> bool {
+            auto next_line = [&](std::string &out) -> bool
+            {
                 if (pos >= data.size())
                     return false;
                 size_t start = pos;
@@ -283,7 +297,8 @@ namespace http_manager
             out_temp = temp;
             out_cond = std::move(cond_str);
 
-            auto parse_int_default = [](const std::string &s, int def) -> int {
+            auto parse_int_default = [](const std::string &s, int def) -> int
+            {
                 if (s.empty())
                     return def;
                 char *endp_local = nullptr;
