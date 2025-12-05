@@ -69,7 +69,7 @@ esp_err_t devices_lvgl_init(esp_lcd_touch_handle_t touch_handle)
     lv_display_set_offset(s_lvgl_disp, 6, 0);
 
     // твой новый цвет
-    lv_color_t primary = lv_color_hex(0xFF9800);
+    lv_color_t primary = lv_color_hex(0xd34836);
     lv_color_t secondary = lv_color_hex(0x303030);
 
     const lv_font_t *font = LV_FONT_DEFAULT;

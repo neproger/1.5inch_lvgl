@@ -11,6 +11,8 @@
 #include "esp_log.h"
 #include "esp_check.h"
 
+#include "lwip/ip4_addr.h"
+
 #include "wifi_manager.h"
 #include "config_server/config_store_c.h"
 
@@ -354,11 +356,40 @@ esp_err_t wifi_manager_start_ap_config(const char *ssid, const char *password)
     cfg.ap.channel = 1;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_AP), TAG, "esp_wifi_set_mode(AP) failed");
-      ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &cfg), TAG, "esp_wifi_set_config(AP) failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &cfg), TAG, "esp_wifi_set_config(AP) failed");
 
-      ESP_LOGI(TAG, "AP config started, SSID='%s'", cfg.ap.ssid);
-      return ESP_OK;
-  }
+    if (s_state.ap_netif)
+    {
+        // Ensure AP interface has a static IP and DHCP server is running,
+        // so clients can reliably obtain an address.
+        esp_err_t err = esp_netif_dhcps_stop(s_state.ap_netif);
+        if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED)
+        {
+            ESP_LOGW(TAG, "esp_netif_dhcps_stop(AP) failed: %s", esp_err_to_name(err));
+        }
+
+        esp_netif_ip_info_t ip_info = {};
+        IP4_ADDR(&ip_info.ip, 192, 168, 4, 1);
+        IP4_ADDR(&ip_info.gw, 192, 168, 4, 1);
+        IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
+
+        ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(s_state.ap_netif, &ip_info),
+                            TAG, "esp_netif_set_ip_info(AP) failed");
+
+        err = esp_netif_dhcps_start(s_state.ap_netif);
+        if (err != ESP_OK)
+        {
+            ESP_LOGW(TAG, "esp_netif_dhcps_start(AP) failed: %s", esp_err_to_name(err));
+        }
+        else
+        {
+            ESP_LOGI(TAG, "AP DHCP server started, IP=" IPSTR, IP2STR(&ip_info.ip));
+        }
+    }
+
+    ESP_LOGI(TAG, "AP config started, SSID='%s'", cfg.ap.ssid);
+    return ESP_OK;
+}
 
   esp_err_t wifi_manager_suspend(void)
   {

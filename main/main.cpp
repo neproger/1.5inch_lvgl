@@ -72,7 +72,9 @@ static void enter_config_mode()
     // Stop ongoing bootstrap attempts (if any), then start configuration
     // access point + HTTP UI and park main task.
     http_manager::cancel_bootstrap();
+    (void)wifi_manager_suspend();
     (void)wifi_manager_start_ap_config("esp32-ha-setup", nullptr);
+    (void)wifi_manager_resume();
     (void)config_server::start();
     ESP_LOGI(TAG_APP, "Config mode: AP 'esp32-ha-setup' with HTTP config server");
     for (;;)
@@ -133,7 +135,7 @@ extern "C" void app_main(void)
                     return;
                 }
                 set_app_state(AppState::ConfigMode);
-                enter_config_mode();
+                http_manager::cancel_bootstrap();
             },
             nullptr,
             &inst);
@@ -166,7 +168,16 @@ extern "C" void app_main(void)
 
     ui::splash::update_state(50, "Подключение..."); // WiFi + display/devices ready
 
-    if (!http_manager::bootstrap_state())
+    bool bootstrap_ok = http_manager::bootstrap_state();
+
+    if (g_app_state == AppState::ConfigMode)
+    {
+        ESP_LOGI(TAG_APP, "Bootstrap interrupted, entering config mode");
+        enter_config_mode();
+        return;
+    }
+
+    if (!bootstrap_ok)
     {
         ESP_LOGE(TAG_APP, "Bootstrap over HTTPS failed, entering config mode");
         ESP_LOGW(TAG_APP, "No Wi-Fi/HA config stored; use setup button on splash");
