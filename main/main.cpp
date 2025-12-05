@@ -20,6 +20,7 @@
 #include "app/toggle_controller.hpp"
 #include "app/app_state.hpp"
 #include "app/app_events.hpp"
+#include "app/app_config.hpp"
 
 #include "config_server/config_store.hpp"
 #include "config_server/config_server.hpp"
@@ -46,8 +47,6 @@ static void idle_controller_task(void *arg)
 {
     (void)arg;
 
-    static constexpr uint32_t kScreensaverTimeoutMs = 10000;
-
     for (;;)
     {
         lvgl_port_lock(0);
@@ -56,7 +55,7 @@ static void idle_controller_task(void *arg)
         lvgl_port_unlock();
 
         if (g_app_state == AppState::NormalAwake &&
-            inactive_ms >= kScreensaverTimeoutMs &&
+            inactive_ms >= app_config::kScreensaverIdleTimeoutMs &&
             !ui::screensaver::is_active())
         {
             set_app_state(AppState::NormalScreensaver);

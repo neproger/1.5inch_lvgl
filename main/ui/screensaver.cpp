@@ -14,6 +14,7 @@
 #include "wifi_manager.h"
 #include "app/app_state.hpp"
 #include "app/app_events.hpp"
+#include "app/app_config.hpp"
 #include "locale_ru.hpp"
 
 namespace ui
@@ -157,7 +158,7 @@ namespace ui
 
             if (s_clock_timer == nullptr)
             {
-                s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
+                s_clock_timer = lv_timer_create(clock_timer_cb, app_config::kScreensaverClockTickMs, nullptr);
             }
 
             lvgl_port_unlock();
@@ -187,8 +188,8 @@ namespace ui
                     lv_timer_del(s_backlight_timer);
                     s_backlight_timer = nullptr;
                 }
-                // After 5 seconds of screensaver activity, turn off the display
-                s_backlight_timer = lv_timer_create(backlight_timer_cb, 5000, nullptr);
+                // After configured delay of screensaver activity, turn off the display
+                s_backlight_timer = lv_timer_create(backlight_timer_cb, app_config::kScreensaverBacklightOffDelayMs, nullptr);
             }
 
             lvgl_port_unlock();
@@ -199,6 +200,35 @@ namespace ui
             on_weather_updated();
             on_clock_updated();
         }
+
+        namespace
+        {
+            struct WeatherIconMapEntry
+            {
+                const char *condition;
+                const lv_image_dsc_t *icon;
+            };
+
+            static const WeatherIconMapEntry kWeatherIconMap[] = {
+                {"clear", &clear},
+                {"clear-night", &clear_night},
+                {"sunny", &sunny},
+                {"partlycloudy", &partlycloudy},
+                {"cloudy", &cloudy},
+                {"overcast", &overcast},
+                {"rainy", &rainy},
+                {"pouring", &pouring},
+                {"lightning", &lightning},
+                {"lightning-rainy", &lightning_rainy},
+                {"snowy", &snowy},
+                {"snowy-rainy", &snowy_rainy},
+                {"hail", &hail},
+                {"fog", &fog},
+                {"windy", &windy},
+                {"windy-variant", &windy_variant},
+                {"exceptional", &alien},
+            };
+        } // namespace
 
         static void on_weather_updated()
         {
@@ -213,95 +243,15 @@ namespace ui
                 std::snprintf(temp_buf, sizeof(temp_buf), "%.1f°C", w.temperature_c);
 
                 const std::string &cond = w.condition;
-                if (cond == "clear")
+                cond_text = locale_ru::weather_condition_to_text(cond);
+
+                for (const auto &entry : kWeatherIconMap)
                 {
-                    cond_text = "Ясно";
-                    icon = &clear;
-                }
-                else if (cond == "clear-night")
-                {
-                    cond_text = "Ясно (ночь)";
-                    icon = &clear_night;
-                }
-                else if (cond == "sunny")
-                {
-                    cond_text = "Солнечно";
-                    icon = &sunny;
-                }
-                else if (cond == "partlycloudy")
-                {
-                    cond_text = "Переменная облачность";
-                    icon = &partlycloudy;
-                }
-                else if (cond == "cloudy")
-                {
-                    cond_text = "Облачно";
-                    icon = &cloudy;
-                }
-                else if (cond == "overcast")
-                {
-                    cond_text = "Пасмурно";
-                    icon = &overcast;
-                }
-                else if (cond == "rainy")
-                {
-                    cond_text = "Дождь";
-                    icon = &rainy;
-                }
-                else if (cond == "pouring")
-                {
-                    cond_text = "Ливень";
-                    icon = &pouring;
-                }
-                else if (cond == "lightning")
-                {
-                    cond_text = "Гроза";
-                    icon = &lightning;
-                }
-                else if (cond == "lightning-rainy")
-                {
-                    cond_text = "Гроза с дождём";
-                    icon = &lightning_rainy;
-                }
-                else if (cond == "snowy")
-                {
-                    cond_text = "Снег";
-                    icon = &snowy;
-                }
-                else if (cond == "snowy-rainy")
-                {
-                    cond_text = "Снег с дождём";
-                    icon = &snowy_rainy;
-                }
-                else if (cond == "hail")
-                {
-                    cond_text = "Град";
-                    icon = &hail;
-                }
-                else if (cond == "fog")
-                {
-                    cond_text = "Туман";
-                    icon = &fog;
-                }
-                else if (cond == "windy")
-                {
-                    cond_text = "Ветер";
-                    icon = &windy;
-                }
-                else if (cond == "windy-variant")
-                {
-                    cond_text = "Ветрено, переменная облачность";
-                    icon = &windy_variant;
-                }
-                else if (cond == "exceptional")
-                {
-                    cond_text = "Необычная погода";
-                    icon = &alien;
-                }
-                else
-                {
-                    cond_text = cond.c_str();
-                    icon = &alien;
+                    if (cond == entry.condition)
+                    {
+                        icon = entry.icon;
+                        break;
+                    }
                 }
             }
             else
@@ -338,30 +288,6 @@ namespace ui
                 int minute = static_cast<int>((sec_of_day / 60) % 60);
                 int second = static_cast<int>(sec_of_day % 60);
 
-                static const char *kWeekdayNames[7] = {
-                    "Понедельник",
-                    "Вторник",
-                    "Среда",
-                    "Четверг",
-                    "Пятница",
-                    "Суббота",
-                    "Воскресенье"};
-
-                static const char *kMonthNames[13] = {
-                    "",
-                    "Январь",
-                    "Февраль",
-                    "Март",
-                    "Апрель",
-                    "Май",
-                    "Июнь",
-                    "Июль",
-                    "Август",
-                    "Сентябрь",
-                    "Октябрь",
-                    "Ноябрь",
-                    "Декабрь"};
-
                 int weekday = c.weekday;
                 if (weekday < 0 || weekday > 6)
                     weekday = 0;
@@ -378,14 +304,14 @@ namespace ui
                 char date_buf[32];
 
                 std::snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d", hour, minute, second);
-                std::snprintf(date_buf, sizeof(date_buf), "%s, %d", kMonthNames[month], day);
+                std::snprintf(date_buf, sizeof(date_buf), "%s, %d", locale_ru::kMonthNames[month], day);
 
                 if (s_time_label)
                     lv_label_set_text(s_time_label, time_buf);
                 if (s_date_label)
                     lv_label_set_text(s_date_label, date_buf);
                 if (s_week_day_label)
-                    lv_label_set_text(s_week_day_label, kWeekdayNames[weekday]);
+                    lv_label_set_text(s_week_day_label, locale_ru::kWeekdayNames[weekday]);
             }
         }
 

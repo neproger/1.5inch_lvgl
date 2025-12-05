@@ -10,6 +10,7 @@
 #include "http_utils.h"
 #include "state_manager.hpp"
 #include "config_server/config_store.hpp"
+#include "app/app_config.hpp"
 
 #include <cstring>
 #include <string>
@@ -101,7 +102,7 @@ namespace http_manager
         }
 
         static const char *kBootstrapTemplateBody = R"json(
-{"template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{% if e.startswith('light.') or e.startswith('switch.') %}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endif %}\n{% endfor %}\n{% endfor %}"})json";
+{"template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{% if e.startswith('light.') or e.startswith('switch.') or e.startswith('input_boolean.') %}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endif %}\n{% endfor %}\n{% endfor %}"})json";
 
 
         // Weather template (used by screensaver).
@@ -321,7 +322,7 @@ namespace http_manager
             char buf[256];
 
             const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(5000);
-            const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(50000);
+            const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(app_config::kWeatherPollIntervalMs);
 
             for (;;)
             {
