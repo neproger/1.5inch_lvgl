@@ -5,6 +5,7 @@
 #include "lvgl.h"
 
 #include "display_init.hpp"
+#include "app/app_config.hpp"
 
 static const char *TAG_LVGL = "devices_lvgl";
 
@@ -69,8 +70,8 @@ esp_err_t devices_lvgl_init(esp_lcd_touch_handle_t touch_handle)
     lv_display_set_offset(s_lvgl_disp, 6, 0);
 
     // твой новый цвет
-    lv_color_t primary = lv_color_hex(0xd34836);
-    lv_color_t secondary = lv_color_hex(0x303030);
+    lv_color_t primary = lv_color_hex(app_config::kThemePrimaryColorHex);
+    lv_color_t secondary = lv_color_hex(app_config::kThemeSecondaryColorHex);
 
     const lv_font_t *font = LV_FONT_DEFAULT;
 

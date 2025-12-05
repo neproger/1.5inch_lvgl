@@ -5,6 +5,10 @@
 namespace app_config
 {
 
+    // Accent/theme colors (RGB888 hex).
+    constexpr std::uint32_t kThemePrimaryColorHex = 0x006aa3;
+    constexpr std::uint32_t kThemeSecondaryColorHex = 0x303030;
+
     // Milliseconds of LVGL inactivity before switching to screensaver state.
     constexpr std::uint32_t kScreensaverIdleTimeoutMs = 10000;
 
@@ -18,4 +22,3 @@ namespace app_config
     constexpr std::uint32_t kWeatherPollIntervalMs = 50000;
 
 } // namespace app_config
-
