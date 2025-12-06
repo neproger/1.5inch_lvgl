@@ -18,6 +18,9 @@ namespace http_manager
     // Updates state_manager::set_weather/set_clock() on successful polls.
     void start_weather_polling();
 
+    // Stop periodic weather polling task (if running) to save power.
+    void stop_weather_polling();
+
     // Return the last HA HTTP host/port that successfully responded
     // during bootstrap or weather polling. Returns false if no successful
     // HTTP request has been recorded yet.

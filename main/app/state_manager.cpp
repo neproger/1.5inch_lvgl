@@ -23,6 +23,7 @@ namespace state
         std::unordered_map<std::string, size_t> g_area_index_by_id;
         std::unordered_map<std::string, size_t> g_entity_index_by_id;
         WeatherState g_weather;
+        DhtState g_dht;
         ClockState g_clock;
 
         struct ListenerEntry
@@ -320,6 +321,20 @@ namespace state
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         return g_weather;
+    }
+
+    void set_dht(int temperature_c, int humidity)
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        g_dht.temperature_c = temperature_c;
+        g_dht.humidity = humidity;
+        g_dht.valid = true;
+    }
+
+    DhtState dht()
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        return g_dht;
     }
 
     void set_clock(int year,

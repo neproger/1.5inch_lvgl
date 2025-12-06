@@ -30,6 +30,13 @@ namespace state
         bool valid = false;
     };
 
+    struct DhtState
+    {
+        int temperature_c = 0;
+        int humidity = 0;
+        bool valid = false;
+    };
+
     struct ClockState
     {
         int year = 0;
@@ -58,6 +65,10 @@ namespace state
     // Weather state
     void set_weather(float temperature_c, const std::string &condition);
     WeatherState weather();
+
+    // Local DHT11 sensor state
+    void set_dht(int temperature_c, int humidity);
+    DhtState dht();
 
     // Clock state (time/date synced from HA)
     void set_clock(int year,

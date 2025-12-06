@@ -19,6 +19,9 @@ namespace app_config
     constexpr std::uint32_t kScreensaverClockTickMs = 1000;
 
     // Interval between weather HTTP polls.
-    constexpr std::uint32_t kWeatherPollIntervalMs = 50000;
+    constexpr std::uint32_t kWeatherPollIntervalMs = 120 * 1000;
+
+    // Interval between local DHT11 sensor polls.
+    constexpr std::uint32_t kDhtPollIntervalMs = 100 * 1000;
 
 } // namespace app_config

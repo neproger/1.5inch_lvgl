@@ -6,6 +6,7 @@ idf_component_register(
         "devices/lvgl_init.cpp"
         "devices/input_init.cpp"
         "devices/touch_init.cpp"
+        "devices/dht11.cpp"
         "ui/ui_app.cpp"
         "ui/rooms.cpp"
         "ui/screensaver.cpp"

@@ -110,6 +110,7 @@ namespace http_manager
 {"template":"Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"})json";
 
         static TaskHandle_t s_weather_task = nullptr;
+        static volatile bool s_weather_stop = false;
 
         static bool ensure_wifi_connected()
         {
@@ -326,6 +327,10 @@ namespace http_manager
 
             for (;;)
             {
+                if (s_weather_stop)
+                {
+                    break;
+                }
                 if (!wifi_manager_is_connected())
                 {
                     vTaskDelay(kErrorDelayTicks);
@@ -405,6 +410,10 @@ namespace http_manager
                 state::set_clock(year, month, day, weekday, hour, minute, second, esp_timer_get_time());
                 vTaskDelay(kPollIntervalTicks);
             }
+
+            s_weather_task = nullptr;
+            s_weather_stop = false;
+            vTaskDelete(nullptr);
         }
 
     } // namespace
@@ -442,9 +451,18 @@ namespace http_manager
     {
         if (s_weather_task == nullptr)
         {
+            s_weather_stop = false;
             // Weather task does HTTP requests, string parsing, etc.,
             // so give it a slightly larger stack to avoid overflow.
             xTaskCreate(weather_task, "weather", 6144, nullptr, 3, &s_weather_task);
+        }
+    }
+
+    void stop_weather_polling()
+    {
+        if (s_weather_task != nullptr)
+        {
+            s_weather_stop = true;
         }
     }
 

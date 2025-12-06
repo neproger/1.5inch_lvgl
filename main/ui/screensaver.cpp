@@ -329,6 +329,10 @@ namespace ui
             if (devices_display_set_enabled(false) == ESP_OK)
             {
                 s_backlight_off = true;
+                if (s_clock_timer)
+                {
+                    lv_timer_pause(s_clock_timer);
+                }
             }
         }
 
@@ -363,6 +367,10 @@ namespace ui
                 {
                     (void)devices_display_set_enabled(true);
                     s_backlight_off = false;
+                    if (s_clock_timer)
+                    {
+                        lv_timer_resume(s_clock_timer);
+                    }
                 }
                 s_active = false;
                 break;

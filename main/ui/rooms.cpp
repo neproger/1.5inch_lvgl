@@ -11,6 +11,7 @@
 #include "screensaver.hpp"
 #include "app/app_events.hpp"
 #include "app/app_state.hpp"
+#include "app/state_manager.hpp"
 
 #include <cstdio>
 
@@ -22,6 +23,30 @@ namespace ui
         static bool s_nav_handler_registered = false;
         static bool s_state_handler_registered = false;
         static bool s_entity_handler_registered = false;
+        static lv_timer_t *s_dht_timer = nullptr;
+
+        static void dht_timer_cb(lv_timer_t * /*timer*/)
+        {
+            state::DhtState d = state::dht();
+            if (!d.valid)
+            {
+                return;
+            }
+
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%d°C  %d%%", d.temperature_c, d.humidity);
+
+            lvgl_port_lock(-1);
+            for (auto &page : s_room_pages)
+            {
+                if (!page.dht_label)
+                {
+                    continue;
+                }
+                lv_label_set_text(page.dht_label, buf);
+            }
+            lvgl_port_unlock();
+        }
 
         static void tileview_event_cb(lv_event_t *e)
         {
@@ -140,9 +165,15 @@ namespace ui
 
                 page.title_label = lv_label_create(page.root);
                 lv_label_set_text(page.title_label, page.area_name.c_str());
-                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
+                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xFFFFFF), 0);
                 lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
                 lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
+
+                page.dht_label = lv_label_create(page.root);
+                lv_label_set_text(page.dht_label, "");
+                lv_obj_set_style_text_color(page.dht_label, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_text_font(page.dht_label, &Montserrat_40, 0);
+                lv_obj_align(page.dht_label, LV_ALIGN_BOTTOM_MID, 0, -30);
 
                 s_room_pages.push_back(std::move(page));
             }
@@ -277,6 +308,11 @@ namespace ui
                     nullptr,
                     &inst);
                 s_entity_handler_registered = true;
+            }
+
+            if (!s_dht_timer)
+            {
+                s_dht_timer = lv_timer_create(dht_timer_cb, 2000, nullptr);
             }
         }
 

@@ -21,6 +21,8 @@
 #include "app/app_state.hpp"
 #include "app/app_events.hpp"
 #include "app/app_config.hpp"
+#include "app/state_manager.hpp"
+#include "devices/dht11.hpp"
 
 #include "config_server/config_store.hpp"
 #include "config_server/config_server.hpp"
@@ -28,6 +30,8 @@
 static const char *TAG_APP = "app";
 
 static AppState g_app_state = AppState::BootDevices;
+
+static constexpr gpio_num_t kDhtGpio = GPIO_NUM_39;
 
 static void set_app_state(AppState new_state)
 {
@@ -37,6 +41,17 @@ static void set_app_state(AppState new_state)
     }
     AppState old = g_app_state;
     g_app_state = new_state;
+
+    // Start/stop background services based on high-level app state.
+    if (old != AppState::NormalAwake && new_state == AppState::NormalAwake)
+    {
+        http_manager::start_weather_polling();
+    }
+    else if (old == AppState::NormalAwake && new_state != AppState::NormalAwake)
+    {
+        http_manager::stop_weather_polling();
+    }
+
     (void)app_events::post_app_state_changed(old, new_state, esp_timer_get_time(), false);
 }
 
@@ -62,6 +77,38 @@ static void idle_controller_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+static void dht_task(void *arg)
+{
+    (void)arg;
+
+    for (;;)
+    {
+        if (g_app_state != AppState::NormalAwake)
+        {
+            vTaskDelay(pdMS_TO_TICKS(app_config::kDhtPollIntervalMs));
+            continue;
+        }
+
+        int humidity = 0;
+        int temperature = 0;
+        esp_err_t err = dht11::read(kDhtGpio, &humidity, &temperature);
+
+        if (err == ESP_OK)
+        {
+            state::set_dht(temperature, humidity);
+            ESP_LOGI("DHT11", "Temperature: %d C, Humidity: %d %%", temperature, humidity);
+        }
+        else
+        {
+            ESP_LOGW("DHT11", "Read failed: %s", esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        // DHT11 рекомендует не чаще 1 раза в секунду;
+        vTaskDelay(pdMS_TO_TICKS(app_config::kDhtPollIntervalMs));
     }
 }
 
@@ -197,8 +244,9 @@ extern "C" void app_main(void)
         // Start idle controller task to drive screensaver based on LVGL inactivity.
         (void)xTaskCreate(idle_controller_task, "idle_ctrl", 4096, nullptr, 2, nullptr);
 
-        ui::splash::destroy();
+        // Start DHT11 polling task on GPIO 39.
+        (void)xTaskCreate(dht_task, "dht11_task", 4096, nullptr, 3, nullptr);
 
-        http_manager::start_weather_polling();
+        ui::splash::destroy();
     }
 }
