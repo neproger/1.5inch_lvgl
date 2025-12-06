@@ -88,7 +88,7 @@ static void dht_task(void *arg)
     {
         if (g_app_state != AppState::NormalAwake)
         {
-            vTaskDelay(pdMS_TO_TICKS(app_config::kDhtPollIntervalMs));
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
