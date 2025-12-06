@@ -11,6 +11,7 @@
 #include "state_manager.hpp"
 #include "config_server/config_store.hpp"
 #include "app/app_config.hpp"
+#include "app/app_state.hpp"
 
 #include <cstring>
 #include <string>
@@ -104,13 +105,11 @@ namespace http_manager
         static const char *kBootstrapTemplateBody = R"json(
 {"template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{% if e.startswith('light.') or e.startswith('switch.') or e.startswith('input_boolean.') %}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endif %}\n{% endfor %}\n{% endfor %}"})json";
 
-
         // Weather template (used by screensaver).
         static const char *kWeatherTemplateBody = R"json(
 {"template":"Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"})json";
 
         static TaskHandle_t s_weather_task = nullptr;
-        static volatile bool s_weather_stop = false;
 
         static bool ensure_wifi_connected()
         {
@@ -322,16 +321,12 @@ namespace http_manager
             (void)arg;
             char buf[256];
 
-            const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(5000);
+            const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(2000);
             const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(app_config::kWeatherPollIntervalMs);
 
             for (;;)
             {
-                if (s_weather_stop)
-                {
-                    break;
-                }
-                if (!wifi_manager_is_connected())
+                if (!wifi_manager_is_connected() || g_app_state == AppState::NormalScreensaver)
                 {
                     vTaskDelay(kErrorDelayTicks);
                     continue;
@@ -412,7 +407,6 @@ namespace http_manager
             }
 
             s_weather_task = nullptr;
-            s_weather_stop = false;
             vTaskDelete(nullptr);
         }
 
@@ -451,18 +445,9 @@ namespace http_manager
     {
         if (s_weather_task == nullptr)
         {
-            s_weather_stop = false;
             // Weather task does HTTP requests, string parsing, etc.,
             // so give it a slightly larger stack to avoid overflow.
             xTaskCreate(weather_task, "weather", 6144, nullptr, 3, &s_weather_task);
-        }
-    }
-
-    void stop_weather_polling()
-    {
-        if (s_weather_task != nullptr)
-        {
-            s_weather_stop = true;
         }
     }
 

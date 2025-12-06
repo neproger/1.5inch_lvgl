@@ -29,7 +29,7 @@
 
 static const char *TAG_APP = "app";
 
-static AppState g_app_state = AppState::BootDevices;
+AppState g_app_state = AppState::BootDevices;
 
 static constexpr gpio_num_t kDhtGpio = GPIO_NUM_39;
 
@@ -41,16 +41,6 @@ static void set_app_state(AppState new_state)
     }
     AppState old = g_app_state;
     g_app_state = new_state;
-
-    // Start/stop background services based on high-level app state.
-    if (old != AppState::NormalAwake && new_state == AppState::NormalAwake)
-    {
-        http_manager::start_weather_polling();
-    }
-    else if (old == AppState::NormalAwake && new_state != AppState::NormalAwake)
-    {
-        http_manager::stop_weather_polling();
-    }
 
     (void)app_events::post_app_state_changed(old, new_state, esp_timer_get_time(), false);
 }
@@ -86,9 +76,9 @@ static void dht_task(void *arg)
 
     for (;;)
     {
-        if (g_app_state != AppState::NormalAwake)
+        if (g_app_state == AppState::NormalScreensaver)
         {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
 
@@ -240,6 +230,7 @@ extern "C" void app_main(void)
 
         // Application is now in normal awake mode (rooms UI visible, MQTT running)
         set_app_state(AppState::NormalAwake);
+        http_manager::start_weather_polling();
 
         // Start idle controller task to drive screensaver based on LVGL inactivity.
         (void)xTaskCreate(idle_controller_task, "idle_ctrl", 4096, nullptr, 2, nullptr);

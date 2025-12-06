@@ -13,3 +13,6 @@ enum class AppState
     ConfigMode,
 };
 
+// Global application state variable defined in main.cpp.
+extern AppState g_app_state;
+
