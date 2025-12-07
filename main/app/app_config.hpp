@@ -22,6 +22,6 @@ namespace app_config
     constexpr std::uint32_t kWeatherPollIntervalMs = 120 * 1000;
 
     // Interval between local DHT11 sensor polls.
-    constexpr std::uint32_t kDhtPollIntervalMs = 100 * 1000;
+    constexpr std::uint32_t kDhtPollIntervalMs = 2 * 1000;
 
 } // namespace app_config
