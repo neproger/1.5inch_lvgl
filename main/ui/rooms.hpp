@@ -21,6 +21,7 @@ namespace ui
             lv_obj_t *container = nullptr;
             lv_obj_t *label = nullptr;
             lv_obj_t *control = nullptr; // e.g. lv_switch
+            lv_obj_t *ring = nullptr;    // ring arc around screen
         };
 
         struct RoomPage
@@ -29,7 +30,8 @@ namespace ui
             std::string area_name;
             lv_obj_t *root = nullptr;
             lv_obj_t *title_label = nullptr;
-            lv_obj_t *list_container = nullptr;
+            lv_obj_t *dht_label = nullptr;
+            lv_obj_t *tileview = nullptr;
             std::vector<DeviceWidget> devices;
         };
 

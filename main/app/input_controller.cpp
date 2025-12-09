@@ -71,8 +71,8 @@ namespace input_controller
             const int code = payload->code;
             const std::int64_t ts = payload->timestamp_us;
 
-            // Any input should wake screensaver
-            (void)app_events::post_wake_screensaver(ts, false);
+            // Any input should request wake
+            (void)app_events::post_request_wake(ts, false);
 
             switch (static_cast<KnobCode>(code))
             {
@@ -103,8 +103,8 @@ namespace input_controller
             const int code = payload->code;
             const std::int64_t ts = payload->timestamp_us;
 
-            // Any input should wake screensaver
-            (void)app_events::post_wake_screensaver(ts, false);
+            // Any input should request wake
+            (void)app_events::post_request_wake(ts, false);
 
             // SINGLE_CLICK toggles current entity
             if (code == static_cast<int>(ButtonCode::SingleClick))
@@ -129,8 +129,8 @@ namespace input_controller
             const int code = payload->code;
             const std::int64_t ts = payload->timestamp_us;
 
-            // Any gesture should wake screensaver
-            (void)app_events::post_wake_screensaver(ts, false);
+            // Any gesture should request wake
+            (void)app_events::post_request_wake(ts, false);
 
             // SwipeLeft = next room, SwipeRight = previous room
             switch (static_cast<app_events::GestureCode>(code))

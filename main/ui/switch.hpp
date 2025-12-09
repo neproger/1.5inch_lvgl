@@ -5,6 +5,11 @@
 
 #include <string>
 
+namespace state
+{
+    struct Entity;
+}
+
 namespace ui
 {
     namespace controls
@@ -14,6 +19,14 @@ namespace ui
 
         // Enable or disable user interaction for a LVGL switch-like control
         void set_switch_enabled(lv_obj_t *control, bool enabled);
+
+        // Build a labeled switch widget inside parent and return created objects
+        void ui_add_switch_widget(
+            lv_obj_t *parent,
+            const state::Entity &ent,
+            lv_obj_t *&out_label,
+            lv_obj_t *&out_control,
+            lv_obj_t *&out_ring);
     } // namespace controls
 
     namespace toggle

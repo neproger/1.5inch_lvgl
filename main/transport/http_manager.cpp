@@ -10,10 +10,11 @@
 #include "http_utils.h"
 #include "state_manager.hpp"
 #include "config_server/config_store.hpp"
+#include "app/app_config.hpp"
+#include "app/app_state.hpp"
 
 #include <cstring>
 #include <string>
-
 
 namespace http_manager
 {
@@ -23,11 +24,14 @@ namespace http_manager
 
         static const char *TAG = "http_mgr";
 
+        // When set to true, bootstrap_state() should stop retrying and return.
+        static volatile bool s_cancel_bootstrap = false;
+
         struct HaHttpConfig
         {
             std::string url;
             std::string token;
-            std::string host;      // Raw host from config_store (without scheme transformation)
+            std::string host; // Raw host from config_store (without scheme transformation)
             std::uint16_t http_port{0};
         };
 
@@ -99,17 +103,11 @@ namespace http_manager
         }
 
         static const char *kBootstrapTemplateBody = R"json(
-{
-  "template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endfor %}\n{% endfor %}"
-}
-)json";
+{"template": "AREA_ID,AREA_NAME,ENTITY_ID,ENTITY_NAME,STATE\n{% for area in areas() -%}\n{% for e in area_entities(area) -%}\n{% if e.startswith('light.') or e.startswith('switch.') or e.startswith('input_boolean.') %}\n{{ area }},{{ area_name(area) }},{{ e }},{{ states[e].name }},{{ states[e].state }}\n{% endif %}\n{% endfor %}\n{% endfor %}"})json";
 
         // Weather template (used by screensaver).
         static const char *kWeatherTemplateBody = R"json(
-{
-  "template": "Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"
-}
-)json";
+{"template":"Temperature,Condition,Year,Month,Day,Weekday,Hour,Minute,Second\n{% set w = states['weather.forecast_home_assistant'] %}\n{{ w.attributes.temperature if w else 'N/A' }},{{ w.state if w else 'N/A' }},{{ now().year }},{{ now().month }},{{ now().day }},{{ now().weekday() }},{{ now().strftime('%H') }},{{ now().strftime('%M') }},{{ now().strftime('%S') }}"})json";
 
         static TaskHandle_t s_weather_task = nullptr;
 
@@ -137,12 +135,24 @@ namespace http_manager
 
         static bool perform_bootstrap_request()
         {
+            if (s_cancel_bootstrap)
+            {
+                ESP_LOGW(TAG, "Bootstrap cancelled before HTTP attempts");
+                return false;
+            }
+
             HaHttpConfig cfgs[4];
             const int cfg_count = build_http_configs(cfgs, 4);
             char buf[2048];
 
             for (int i = 0; i < cfg_count; ++i)
             {
+                if (s_cancel_bootstrap)
+                {
+                    ESP_LOGW(TAG, "Bootstrap cancelled during HTTP attempts");
+                    return false;
+                }
+
                 int status = 0;
                 const char *token = (!cfgs[i].token.empty() && cfgs[i].token[0]) ? cfgs[i].token.c_str() : nullptr;
                 ESP_LOGI(TAG, "Bootstrap: trying HA server %d/%d at %s", i + 1, cfg_count, cfgs[i].url.c_str());
@@ -217,7 +227,8 @@ namespace http_manager
             std::string line;
             size_t pos = 0;
 
-            auto next_line = [&](std::string &out) -> bool {
+            auto next_line = [&](std::string &out) -> bool
+            {
                 if (pos >= data.size())
                     return false;
                 size_t start = pos;
@@ -283,7 +294,8 @@ namespace http_manager
             out_temp = temp;
             out_cond = std::move(cond_str);
 
-            auto parse_int_default = [](const std::string &s, int def) -> int {
+            auto parse_int_default = [](const std::string &s, int def) -> int
+            {
                 if (s.empty())
                     return def;
                 char *endp_local = nullptr;
@@ -309,12 +321,12 @@ namespace http_manager
             (void)arg;
             char buf[256];
 
-            const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(5000);
-            const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(50000);
+            const TickType_t kErrorDelayTicks = pdMS_TO_TICKS(2000);
+            const TickType_t kPollIntervalTicks = pdMS_TO_TICKS(app_config::kWeatherPollIntervalMs);
 
             for (;;)
             {
-                if (!wifi_manager_is_connected())
+                if (!wifi_manager_is_connected() || g_app_state == AppState::NormalScreensaver)
                 {
                     vTaskDelay(kErrorDelayTicks);
                     continue;
@@ -393,15 +405,22 @@ namespace http_manager
                 state::set_clock(year, month, day, weekday, hour, minute, second, esp_timer_get_time());
                 vTaskDelay(kPollIntervalTicks);
             }
+
+            s_weather_task = nullptr;
+            vTaskDelete(nullptr);
         }
 
     } // namespace
 
     bool bootstrap_state()
     {
-        static constexpr int kMaxAttempts = 3;
-        for (int attempt = 1; attempt <= kMaxAttempts; ++attempt)
+        for (int attempt = 1;; ++attempt)
         {
+            if (s_cancel_bootstrap)
+            {
+                ESP_LOGW(TAG, "Bootstrap cancelled");
+                return false;
+            }
             if (!ensure_wifi_connected())
             {
                 vTaskDelay(pdMS_TO_TICKS(3000));
@@ -411,10 +430,15 @@ namespace http_manager
             {
                 return true;
             }
-            ESP_LOGW(TAG, "Bootstrap attempt %d/%d failed", attempt, kMaxAttempts);
+            ESP_LOGW(TAG, "Bootstrap attempt %d failed", attempt);
             vTaskDelay(pdMS_TO_TICKS(3000));
         }
         return false;
+    }
+
+    void cancel_bootstrap()
+    {
+        s_cancel_bootstrap = true;
     }
 
     void start_weather_polling()

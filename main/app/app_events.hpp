@@ -3,6 +3,8 @@
 #include "esp_event.h"
 #include <cstdint>
 
+#include "app_state.hpp"
+
 // Application-level event base for internal messages
 ESP_EVENT_DECLARE_BASE(APP_EVENTS);
 
@@ -15,11 +17,16 @@ namespace app_events
         BUTTON = 2,
         GESTURE = 3,
         NAVIGATE_ROOM = 10,
-        WAKE_SCREENSAVER = 11,
         TOGGLE_CURRENT_ENTITY = 12,
         ENTITY_STATE_CHANGED = 20,
+        WEATHER_UPDATED = 40,
+        CLOCK_UPDATED = 41,
         TOGGLE_REQUEST = 30,
         TOGGLE_RESULT = 31,
+        APP_STATE_CHANGED = 100,
+        REQUEST_CONFIG_MODE = 110,
+        REQUEST_SLEEP = 111,
+        REQUEST_WAKE = 112,
     };
 
     enum class GestureCode : int
@@ -52,11 +59,6 @@ namespace app_events
         std::int64_t timestamp_us = 0;
     };
 
-    struct WakeScreensaverPayload
-    {
-        std::int64_t timestamp_us = 0;
-    };
-
     struct ToggleCurrentEntityPayload
     {
         std::int64_t timestamp_us = 0;
@@ -81,6 +83,19 @@ namespace app_events
         std::int64_t timestamp_us = 0;
     };
 
+    struct AppStateChangedPayload
+    {
+        int old_state = 0; // static_cast<int>(AppState)
+        int new_state = 0; // static_cast<int>(AppState)
+        std::int64_t timestamp_us = 0;
+    };
+
+    struct EmptyPayload
+    {
+        std::int64_t timestamp_us = 0;
+    };
+
+    const char *id_to_string(int32_t id);
     // Currently a no-op stub; kept for symmetry / future use
     inline esp_err_t init()
     {
@@ -91,10 +106,15 @@ namespace app_events
     esp_err_t post_button(int code, std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_gesture(int code, std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_navigate_room(int delta, std::int64_t timestamp_us, bool from_isr);
-    esp_err_t post_wake_screensaver(std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_toggle_current_entity(std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_entity_state_changed(const char *entity_id, std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_toggle_request(const char *entity_id, std::int64_t timestamp_us, bool from_isr);
     esp_err_t post_toggle_result(const char *entity_id, bool success, std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_app_state_changed(AppState old_state, AppState new_state, std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_request_config_mode(std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_request_sleep(std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_request_wake(std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_weather_updated(std::int64_t timestamp_us, bool from_isr);
+    esp_err_t post_clock_updated(std::int64_t timestamp_us, bool from_isr);
 
 } // namespace app_events

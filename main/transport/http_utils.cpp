@@ -38,7 +38,7 @@ esp_err_t http_send(const char *method,
 
     esp_http_client_config_t cfg = {};
     cfg.url = url;
-    cfg.timeout_ms = 30000;
+    cfg.timeout_ms = 10000;
     cfg.disable_auto_redirect = false;
     cfg.buffer_size = 2048;
     cfg.buffer_size_tx = 1024;

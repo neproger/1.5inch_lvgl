@@ -10,9 +10,7 @@ namespace ui
         extern lv_obj_t *s_splash_bar;
         extern lv_obj_t *s_splash_label;
 
-        using ConfigCallback = void (*)();
-
-        void show(ConfigCallback on_config = nullptr);
+        void show();
         void update_progress(int percent);
         void update_state(int percent, const char *text);
         void destroy();

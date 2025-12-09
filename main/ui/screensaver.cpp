@@ -12,6 +12,10 @@
 #include "state_manager.hpp"
 #include "devices_init.h"
 #include "wifi_manager.h"
+#include "app/app_state.hpp"
+#include "app/app_events.hpp"
+#include "app/app_config.hpp"
+#include "locale_ru.hpp"
 
 namespace ui
 {
@@ -25,16 +29,19 @@ namespace ui
         lv_obj_t *s_date_label = nullptr;
         lv_obj_t *s_week_day_label = nullptr;
 
-        static lv_timer_t *s_idle_timer = nullptr;
+        static lv_timer_t *s_backlight_timer = nullptr;
         static lv_timer_t *s_clock_timer = nullptr;
         static bool s_active = false;
         static bool s_backlight_off = false;
-        static const uint32_t kScreensaverTimeoutMs = 10000;
-        static const uint32_t kBacklightOffAfterScreensaverMs = 30000;
+        static esp_event_handler_instance_t s_app_state_handler = nullptr;
+        static esp_event_handler_instance_t s_weather_handler = nullptr;
+        static esp_event_handler_instance_t s_clock_handler = nullptr;
 
-        static void idle_timer_cb(lv_timer_t *timer);
+        static void backlight_timer_cb(lv_timer_t *timer);
         static void clock_timer_cb(lv_timer_t *timer);
-        static void enter_light_sleep(void);
+        static void on_app_state_changed(const app_events::AppStateChangedPayload *payload);
+        static void on_weather_updated();
+        static void on_clock_updated();
 
         void ui_build_screensaver()
         {
@@ -93,13 +100,65 @@ namespace ui
             ui_build_screensaver();
             ui_update_weather_and_clock();
 
-            if (s_idle_timer == nullptr)
+            if (s_app_state_handler == nullptr)
             {
-                s_idle_timer = lv_timer_create(idle_timer_cb, 500, nullptr);
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::APP_STATE_CHANGED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
+                    {
+                        if (base != APP_EVENTS || id != app_events::APP_STATE_CHANGED || !event_data)
+                        {
+                            return;
+                        }
+                        const auto *p = static_cast<const app_events::AppStateChangedPayload *>(event_data);
+                        on_app_state_changed(p);
+                    },
+                    nullptr,
+                    &s_app_state_handler);
             }
+
+            if (s_weather_handler == nullptr)
+            {
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::WEATHER_UPDATED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    {
+                        if (base != APP_EVENTS || id != app_events::WEATHER_UPDATED)
+                        {
+                            return;
+                        }
+                        lvgl_port_lock(-1);
+                        on_weather_updated();
+                        lvgl_port_unlock();
+                    },
+                    nullptr,
+                    &s_weather_handler);
+            }
+
+            if (s_clock_handler == nullptr)
+            {
+                (void)esp_event_handler_instance_register(
+                    APP_EVENTS,
+                    app_events::CLOCK_UPDATED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    {
+                        if (base != APP_EVENTS || id != app_events::CLOCK_UPDATED)
+                        {
+                            return;
+                        }
+                        lvgl_port_lock(-1);
+                        on_clock_updated();
+                        lvgl_port_unlock();
+                    },
+                    nullptr,
+                    &s_clock_handler);
+            }
+
             if (s_clock_timer == nullptr)
             {
-                s_clock_timer = lv_timer_create(clock_timer_cb, 1000, nullptr);
+                s_clock_timer = lv_timer_create(clock_timer_cb, app_config::kScreensaverClockTickMs, nullptr);
             }
 
             lvgl_port_unlock();
@@ -112,6 +171,8 @@ namespace ui
 
         void show()
         {
+            lvgl_port_lock(0);
+
             if (!s_screensaver_root)
             {
                 ui_build_screensaver();
@@ -120,21 +181,56 @@ namespace ui
             {
                 lv_disp_load_scr(s_screensaver_root);
                 s_active = true;
-            }
-        }
-
-        void hide_to_room(lv_obj_t *room_root)
-        {
-            if (room_root)
-            {
-                lv_disp_load_scr(room_root);
-                (void)devices_display_set_enabled(true);
                 s_backlight_off = false;
-                s_active = false;
+
+                if (s_backlight_timer)
+                {
+                    lv_timer_del(s_backlight_timer);
+                    s_backlight_timer = nullptr;
+                }
+                // After configured delay of screensaver activity, turn off the display
+                s_backlight_timer = lv_timer_create(backlight_timer_cb, app_config::kScreensaverBacklightOffDelayMs, nullptr);
             }
+
+            lvgl_port_unlock();
         }
 
         void ui_update_weather_and_clock()
+        {
+            on_weather_updated();
+            on_clock_updated();
+        }
+
+        namespace
+        {
+            struct WeatherIconMapEntry
+            {
+                const char *condition;
+                const lv_image_dsc_t *icon;
+            };
+
+            static const WeatherIconMapEntry kWeatherIconMap[] = {
+                {"clear", &clear},
+                {"clear-night", &clear_night},
+                {"sunny", &sunny},
+                {"partlycloudy", &partlycloudy},
+                {"cloudy", &cloudy},
+                {"overcast", &overcast},
+                {"rainy", &rainy},
+                {"pouring", &pouring},
+                {"lightning", &lightning},
+                {"lightning-rainy", &lightning_rainy},
+                {"snowy", &snowy},
+                {"snowy-rainy", &snowy_rainy},
+                {"hail", &hail},
+                {"fog", &fog},
+                {"windy", &windy},
+                {"windy-variant", &windy_variant},
+                {"exceptional", &alien},
+            };
+        } // namespace
+
+        static void on_weather_updated()
         {
             state::WeatherState w = state::weather();
 
@@ -147,117 +243,34 @@ namespace ui
                 std::snprintf(temp_buf, sizeof(temp_buf), "%.1f°C", w.temperature_c);
 
                 const std::string &cond = w.condition;
-                if (cond == "clear")
+                cond_text = locale_ru::weather_condition_to_text(cond);
+
+                for (const auto &entry : kWeatherIconMap)
                 {
-                    cond_text = "Ясно";
-                    icon = &clear;
-                }
-                else if (cond == "clear-night")
-                {
-                    cond_text = "Ясно";
-                    icon = &clear_night;
-                }
-                else if (cond == "sunny")
-                {
-                    cond_text = "Солнечно";
-                    icon = &sunny;
-                }
-                else if (cond == "partlycloudy")
-                {
-                    cond_text = "Переменная облачность";
-                    icon = &partlycloudy;
-                }
-                else if (cond == "cloudy")
-                {
-                    cond_text = "Облачно";
-                    icon = &cloudy;
-                }
-                else if (cond == "overcast")
-                {
-                    cond_text = "Пасмурно";
-                    icon = &overcast;
-                }
-                else if (cond == "rainy")
-                {
-                    cond_text = "Дождь";
-                    icon = &rainy;
-                }
-                else if (cond == "pouring")
-                {
-                    cond_text = "Ливень";
-                    icon = &pouring;
-                }
-                else if (cond == "lightning")
-                {
-                    cond_text = "Гроза";
-                    icon = &lightning;
-                }
-                else if (cond == "lightning-rainy")
-                {
-                    cond_text = "Гроза с дождём";
-                    icon = &lightning_rainy;
-                }
-                else if (cond == "snowy")
-                {
-                    cond_text = "Снег";
-                    icon = &snowy;
-                }
-                else if (cond == "snowy-rainy")
-                {
-                    cond_text = "Снег с дождём";
-                    icon = &snowy_rainy;
-                }
-                else if (cond == "hail")
-                {
-                    cond_text = "Град";
-                    icon = &hail;
-                }
-                else if (cond == "fog")
-                {
-                    cond_text = "Туман";
-                    icon = &fog;
-                }
-                else if (cond == "windy")
-                {
-                    cond_text = "Ветрено";
-                    icon = &windy;
-                }
-                else if (cond == "windy-variant")
-                {
-                    cond_text = "Ветрено, переменная облачность";
-                    icon = &windy_variant;
-                }
-                else if (cond == "exceptional")
-                {
-                    cond_text = "Необычная погода";
-                    icon = &alien;
-                }
-                else
-                {
-                    cond_text = w.condition.c_str();
-                    icon = &alien;
+                    if (cond == entry.condition)
+                    {
+                        icon = entry.icon;
+                        break;
+                    }
                 }
             }
             else
             {
-                std::snprintf(temp_buf, sizeof(temp_buf), "--°C");
-                cond_text = "--";
+                std::snprintf(temp_buf, sizeof(temp_buf), "--.-°C");
+                cond_text = "N/A";
                 icon = &alien;
             }
 
             if (s_weather_temp_label)
-            {
                 lv_label_set_text(s_weather_temp_label, temp_buf);
-            }
             if (s_weather_cond_label)
-            {
                 lv_label_set_text(s_weather_cond_label, cond_text ? cond_text : "");
-            }
-            if (s_weather_icon && icon)
-            {
+            if (s_weather_icon)
                 lv_image_set_src(s_weather_icon, icon);
-            }
+        }
 
+        static void on_clock_updated()
+        {
             state::ClockState c = state::clock();
             if (c.valid)
             {
@@ -275,30 +288,6 @@ namespace ui
                 int minute = static_cast<int>((sec_of_day / 60) % 60);
                 int second = static_cast<int>(sec_of_day % 60);
 
-                static const char *kWeekdayNames[7] = {
-                    "Воскресенье",
-                    "Понедельник",
-                    "Вторник",
-                    "Среда",
-                    "Четверг",
-                    "Пятница",
-                    "Суббота"};
-
-                static const char *kMonthNames[13] = {
-                    "",
-                    "Январь",
-                    "Февраль",
-                    "Март",
-                    "Апрель",
-                    "Май",
-                    "Июнь",
-                    "Июль",
-                    "Август",
-                    "Сентябрь",
-                    "Октябрь",
-                    "Ноябрь",
-                    "Декабрь"};
-
                 int weekday = c.weekday;
                 if (weekday < 0 || weekday > 6)
                     weekday = 0;
@@ -315,54 +304,34 @@ namespace ui
                 char date_buf[32];
 
                 std::snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d", hour, minute, second);
-                std::snprintf(date_buf, sizeof(date_buf), "%s, %d", kMonthNames[month], day);
+                std::snprintf(date_buf, sizeof(date_buf), "%s, %d", locale_ru::kMonthNames[month], day);
 
                 if (s_time_label)
                     lv_label_set_text(s_time_label, time_buf);
                 if (s_date_label)
                     lv_label_set_text(s_date_label, date_buf);
                 if (s_week_day_label)
-                    lv_label_set_text(s_week_day_label, kWeekdayNames[weekday]);
+                    lv_label_set_text(s_week_day_label, locale_ru::kWeekdayNames[weekday]);
             }
         }
 
-        static void idle_timer_cb(lv_timer_t *timer)
+        static const char *TAG = "screensaver";
+
+        static void backlight_timer_cb(lv_timer_t *timer)
         {
             (void)timer;
-
-            lv_display_t *disp = lv_display_get_default();
-            if (!disp)
+            if (!s_active || s_backlight_off)
             {
                 return;
             }
 
-            uint32_t inactive_ms = lv_display_get_inactive_time(disp);
-
-            if (!s_active)
+            ESP_LOGI(TAG, "Screensaver: turning display off after idle");
+            if (devices_display_set_enabled(false) == ESP_OK)
             {
-                if (inactive_ms >= kScreensaverTimeoutMs)
+                s_backlight_off = true;
+                if (s_clock_timer)
                 {
-                    show();
-                }
-            }
-            else
-            {
-                // Screensaver already active.
-                if (inactive_ms >= (kScreensaverTimeoutMs + kBacklightOffAfterScreensaverMs))
-                {
-                    if (!s_backlight_off)
-                    {
-                        ESP_LOGI("screensaver", "Screensaver: dimming backlight (panel off)");
-                        (void)devices_display_set_enabled(false);
-                        s_backlight_off = true;
-                    }
-                }
-                else if (s_backlight_off)
-                {
-                    // Recent activity with saver still shown: turn display back on once.
-                    ESP_LOGI("screensaver", "Screensaver: restoring backlight (panel on)");
-                    (void)devices_display_set_enabled(true);
-                    s_backlight_off = false;
+                    lv_timer_pause(s_clock_timer);
                 }
             }
         }
@@ -370,31 +339,42 @@ namespace ui
         static void clock_timer_cb(lv_timer_t *timer)
         {
             (void)timer;
-
             lvgl_port_lock(-1);
-            ui_update_weather_and_clock();
+            on_clock_updated();
             lvgl_port_unlock();
         }
 
-        static const char *TAG = "screensaver";
-
-        static void enter_light_sleep(void)
+        static void on_app_state_changed(const app_events::AppStateChangedPayload *payload)
         {
-            ESP_LOGI(TAG, "Entering light sleep...");
-            gpio_config_t config = {};
-            config.pin_bit_mask = (1ULL << BSP_BTN_PRESS);
-            config.mode = GPIO_MODE_INPUT;
-            config.pull_up_en = GPIO_PULLUP_ENABLE;
-            config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-            config.intr_type = GPIO_INTR_DISABLE;
-            gpio_config(&config);
-            gpio_wakeup_enable(BSP_BTN_PRESS, GPIO_INTR_LOW_LEVEL);
-            esp_sleep_enable_gpio_wakeup();
+            if (!payload)
+            {
+                return;
+            }
 
-            esp_err_t err = esp_light_sleep_start();
-            esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-            ESP_LOGI(TAG, "Light sleep returned: err=%s, cause=%d", esp_err_to_name(err), (int)cause);
-            lv_display_trigger_activity(nullptr);
+            AppState new_state = static_cast<AppState>(payload->new_state);
+            switch (new_state)
+            {
+            case AppState::NormalScreensaver:
+                show();
+                break;
+            default:
+                if (s_backlight_timer)
+                {
+                    lv_timer_del(s_backlight_timer);
+                    s_backlight_timer = nullptr;
+                }
+                if (s_backlight_off)
+                {
+                    (void)devices_display_set_enabled(true);
+                    s_backlight_off = false;
+                    if (s_clock_timer)
+                    {
+                        lv_timer_resume(s_clock_timer);
+                    }
+                }
+                s_active = false;
+                break;
+            }
         }
 
     } // namespace screensaver

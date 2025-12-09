@@ -10,6 +10,8 @@
 #include "switch.hpp"
 #include "screensaver.hpp"
 #include "app/app_events.hpp"
+#include "app/app_state.hpp"
+#include "app/state_manager.hpp"
 
 #include <cstdio>
 
@@ -19,57 +21,71 @@ namespace ui
     {
         static const char *TAG_UI_ROOMS = "UI_ROOMS";
         static bool s_nav_handler_registered = false;
-        static bool s_wake_handler_registered = false;
+        static bool s_state_handler_registered = false;
         static bool s_entity_handler_registered = false;
+        static lv_timer_t *s_dht_timer = nullptr;
+
+        static void dht_timer_cb(lv_timer_t * /*timer*/)
+        {
+            state::DhtState d = state::dht();
+            if (!d.valid)
+            {
+                return;
+            }
+
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%d°C  %d%%", d.temperature_c, d.humidity);
+
+            lvgl_port_lock(-1);
+            for (auto &page : s_room_pages)
+            {
+                if (!page.dht_label)
+                {
+                    continue;
+                }
+                lv_label_set_text(page.dht_label, buf);
+            }
+            lvgl_port_unlock();
+        }
+
+        static void tileview_event_cb(lv_event_t *e)
+        {
+            lv_event_code_t code = lv_event_get_code(e);
+            if (code != LV_EVENT_VALUE_CHANGED)
+            {
+                return;
+            }
+
+            lv_obj_t *tv = static_cast<lv_obj_t *>(lv_event_get_target(e));
+            lv_obj_t *active_tile = lv_tileview_get_tile_act(tv);
+            if (!active_tile)
+            {
+                return;
+            }
+
+            for (size_t room_idx = 0; room_idx < s_room_pages.size(); ++room_idx)
+            {
+                RoomPage &page = s_room_pages[room_idx];
+                if (page.tileview != tv)
+                {
+                    continue;
+                }
+
+                for (size_t dev_idx = 0; dev_idx < page.devices.size(); ++dev_idx)
+                {
+                    if (page.devices[dev_idx].container == active_tile)
+                    {
+                        s_current_room_index = static_cast<int>(room_idx);
+                        s_current_device_index = static_cast<int>(dev_idx);
+                        return;
+                    }
+                }
+            }
+        }
 
         std::vector<RoomPage> s_room_pages;
         int s_current_room_index = 0;
         int s_current_device_index = 0;
-
-        static void ui_add_switch_widget(RoomPage &page, const state::Entity &ent)
-        {
-            DeviceWidget w;
-            w.entity_id = ent.id;
-            w.name = ent.name;
-            w.container = lv_obj_create(page.list_container);
-            lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_border_width(w.container, 0, 0);
-            lv_obj_set_width(w.container, LV_PCT(100));
-            lv_obj_set_height(w.container, LV_SIZE_CONTENT);
-            lv_obj_set_style_pad_ver(w.container, 8, 0);
-            lv_obj_set_style_pad_hor(w.container, 8, 0);
-            lv_obj_set_style_pad_row(w.container, 10, 0);
-            lv_obj_remove_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
-            lv_obj_set_flex_align(
-                w.container,
-                LV_FLEX_ALIGN_CENTER,
-                LV_FLEX_ALIGN_CENTER,
-                LV_FLEX_ALIGN_CENTER);
-
-            w.label = lv_label_create(w.container);
-            lv_label_set_text(w.label, ent.name.c_str());
-            lv_obj_set_style_text_color(w.label, lv_color_hex(0xE6E6E6), 0);
-            lv_obj_set_style_text_font(w.label, &Montserrat_30, 0);
-
-            w.control = lv_switch_create(w.container);
-            lv_obj_set_style_width(w.control, 160, LV_PART_MAIN);
-            lv_obj_set_style_height(w.control, 70, LV_PART_MAIN);
-
-            bool is_on = (ent.state == "on" || ent.state == "ON" ||
-                          ent.state == "true" || ent.state == "TRUE" ||
-                          ent.state == "1");
-            if (is_on)
-            {
-                lv_obj_add_state(w.control, LV_STATE_CHECKED);
-            }
-            else
-            {
-                lv_obj_clear_state(w.control, LV_STATE_CHECKED);
-            }
-
-            page.devices.push_back(std::move(w));
-        }
 
         void ui_build_room_pages()
         {
@@ -98,28 +114,13 @@ namespace ui
                 lv_obj_set_style_border_width(page.root, 0, 0);
                 lv_obj_remove_flag(page.root, LV_OBJ_FLAG_SCROLLABLE);
 
-                page.title_label = lv_label_create(page.root);
-                lv_label_set_text(page.title_label, page.area_name.c_str());
-                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xE6E6E6), 0);
-                lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
-                lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
-
-                page.list_container = lv_obj_create(page.root);
-                lv_obj_set_style_bg_opa(page.list_container, LV_OPA_TRANSP, 0);
-                lv_obj_set_style_border_width(page.list_container, 0, 0);
-                lv_obj_set_style_pad_row(page.list_container, 20, 0);
-
-                int top = 80;
-                lv_obj_set_size(page.list_container, LV_PCT(90), LV_VER_RES - top);
-                lv_obj_align(page.list_container, LV_ALIGN_TOP_MID, 0, top);
-
-                lv_obj_set_scroll_dir(page.list_container, LV_DIR_VER);
-                lv_obj_set_scrollbar_mode(page.list_container, LV_SCROLLBAR_MODE_AUTO);
-                lv_obj_set_flex_flow(page.list_container, LV_FLEX_FLOW_COLUMN);
-                lv_obj_set_flex_align(page.list_container,
-                                      LV_FLEX_ALIGN_START,
-                                      LV_FLEX_ALIGN_START,
-                                      LV_FLEX_ALIGN_START);
+                page.tileview = lv_tileview_create(page.root);
+                lv_obj_add_event_cb(page.tileview, tileview_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+                lv_obj_set_size(page.tileview, LV_PCT(100), LV_VER_RES);
+                lv_obj_align(page.tileview, LV_ALIGN_TOP_MID, 0, 0);
+                lv_obj_set_style_bg_opa(page.tileview, LV_OPA_TRANSP, 0);
+                lv_obj_set_style_border_width(page.tileview, 0, 0);
+                lv_obj_set_scrollbar_mode(page.tileview, LV_SCROLLBAR_MODE_OFF);
 
                 for (size_t i = 0; i < entities.size(); ++i)
                 {
@@ -127,8 +128,52 @@ namespace ui
                     if (ent.area_id != area.id)
                         continue;
 
-                    ui_add_switch_widget(page, ent);
+                    if (!page.tileview)
+                        continue;
+
+                    DeviceWidget w;
+                    w.entity_id = ent.id;
+                    w.name = ent.name;
+
+                    int row = static_cast<int>(page.devices.size());
+                    w.container = lv_tileview_add_tile(
+                        page.tileview,
+                        0,
+                        row,
+                        static_cast<lv_dir_t>(LV_DIR_TOP | LV_DIR_BOTTOM));
+                    lv_obj_set_size(w.container, LV_PCT(100), LV_PCT(100));
+                    lv_obj_set_style_bg_opa(w.container, LV_OPA_TRANSP, 0);
+                    lv_obj_set_style_border_width(w.container, 0, 0);
+                    lv_obj_remove_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
+                    lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
+                    lv_obj_set_style_pad_row(w.container, 30, 0);   // 10 px
+                    lv_obj_set_flex_align(
+                        w.container,
+                        LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+
+                    ui::controls::ui_add_switch_widget(
+                        w.container,
+                        ent,
+                        w.label,
+                        w.control,
+                        w.ring);
+
+                    page.devices.push_back(std::move(w));
                 }
+
+                page.title_label = lv_label_create(page.root);
+                lv_label_set_text(page.title_label, page.area_name.c_str());
+                lv_obj_set_style_text_color(page.title_label, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_text_font(page.title_label, &Montserrat_50, 0);
+                lv_obj_align(page.title_label, LV_ALIGN_TOP_MID, 0, 30);
+
+                page.dht_label = lv_label_create(page.root);
+                lv_label_set_text(page.dht_label, "");
+                lv_obj_set_style_text_color(page.dht_label, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_text_font(page.dht_label, &Montserrat_40, 0);
+                lv_obj_align(page.dht_label, LV_ALIGN_BOTTOM_MID, 0, -30);
 
                 s_room_pages.push_back(std::move(page));
             }
@@ -182,20 +227,27 @@ namespace ui
                 s_nav_handler_registered = true;
             }
 
-            if (!s_wake_handler_registered)
+            if (!s_state_handler_registered)
             {
                 esp_event_handler_instance_t inst = nullptr;
                 (void)esp_event_handler_instance_register(
                     APP_EVENTS,
-                    app_events::WAKE_SCREENSAVER,
-                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void * /*event_data*/)
+                    app_events::APP_STATE_CHANGED,
+                    [](void * /*arg*/, esp_event_base_t base, int32_t id, void *event_data)
                     {
-                        if (base != APP_EVENTS || id != app_events::WAKE_SCREENSAVER)
+                        if (base != APP_EVENTS || id != app_events::APP_STATE_CHANGED || !event_data)
                         {
                             return;
                         }
 
-                        if (!ui::screensaver::is_active())
+                        const auto *payload = static_cast<const app_events::AppStateChangedPayload *>(event_data);
+                        if (!payload)
+                        {
+                            return;
+                        }
+
+                        AppState new_state = static_cast<AppState>(payload->new_state);
+                        if (new_state != AppState::NormalAwake)
                         {
                             return;
                         }
@@ -211,7 +263,7 @@ namespace ui
                                 {
                                     s_current_room_index = 0;
                                 }
-                                ui::screensaver::hide_to_room(s_room_pages[s_current_room_index].root);
+                                lv_disp_load_scr(s_room_pages[s_current_room_index].root);
                                 // Prevent the same touch from being delivered
                                 // to widgets on the newly shown room screen.
                                 lv_indev_reset(NULL, nullptr);
@@ -222,7 +274,7 @@ namespace ui
                     },
                     nullptr,
                     &inst);
-                s_wake_handler_registered = true;
+                s_state_handler_registered = true;
             }
 
             if (!s_entity_handler_registered)
@@ -256,6 +308,11 @@ namespace ui
                     nullptr,
                     &inst);
                 s_entity_handler_registered = true;
+            }
+
+            if (!s_dht_timer)
+            {
+                s_dht_timer = lv_timer_create(dht_timer_cb, 2000, nullptr);
             }
         }
 
